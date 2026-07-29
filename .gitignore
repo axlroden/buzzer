@@ -1,0 +1,5 @@
+# Real deployment values (domain, addresses, keys) stay out of the repo.
+/local/
+*.env
+*.secret
+result

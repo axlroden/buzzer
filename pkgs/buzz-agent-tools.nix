@@ -1,0 +1,39 @@
+# Builds the Buzz agent binaries from source: `buzz-acp` (the ACP harness that bridges
+# relay events to an agent) and `buzz` (the CLI the agent uses to post, create channels
+# and set its profile). Block publishes an image for the RELAY only - these crates are
+# expected to be compiled, so we build them here rather than copying a hand-built image
+# between hosts.
+{ lib, rustPlatform, fetchFromGitHub, pkg-config, openssl, protobuf, cmake }:
+
+rustPlatform.buildRustPackage rec {
+  pname = "buzz-agent-tools";
+  version = "0-unstable-2026-07-28";
+
+  src = fetchFromGitHub {
+    owner = "block";
+    repo = "buzz";
+    rev = "4a977c588a540be38bd8ddb268cd24437bac8165";
+    hash = "sha256-rrTpV4wYRdL1o0cJXifHz5qGJ4tlr2Go1g3MdNrj26w=";
+  };
+
+  # The workspace lock file pulls ~40 git dependencies; allowBuiltinFetchGit avoids
+  # hand-maintaining an outputHashes entry for every one of them.
+  cargoLock = {
+    lockFile = ./Cargo.lock;   # vendored: keeps eval pure (no import-from-derivation)
+    allowBuiltinFetchGit = true;
+  };
+
+  nativeBuildInputs = [ pkg-config protobuf cmake ];
+  buildInputs = [ openssl ];
+
+  # Only the two agent-side crates; the relay/desktop members are not needed here.
+  cargoBuildFlags = [ "-p" "buzz-acp" "-p" "buzz-cli" ];
+  doCheck = false;
+
+  meta = with lib; {
+    description = "Buzz ACP harness and CLI (agent-side binaries)";
+    homepage = "https://github.com/block/buzz";
+    license = licenses.asl20;
+    platforms = platforms.linux;
+  };
+}
