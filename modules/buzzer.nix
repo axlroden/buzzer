@@ -143,7 +143,7 @@ in
     # ------------------------------------------------------------------ data services
     services.postgresql = {
       enable = true;
-      package = pkgs.postgresql_16;
+      package = pkgs.postgresql_17;
       ensureDatabases = [ cfg.database.name ];
       ensureUsers = [{ name = cfg.database.name; ensureDBOwnership = true; }];
       # The relay runs in a container: it shares the host network namespace but NOT the
@@ -294,7 +294,7 @@ in
       };
     };
 
-    environment.systemPackages = [ buzz-agent-tools pkgs.garage pkgs.postgresql_16 ];
+    environment.systemPackages = [ buzz-agent-tools pkgs.garage pkgs.postgresql_17 ];
 
     # claude-code and the ACP adapter are unfree.
     nixpkgs.config.allowUnfreePredicate = pkg:

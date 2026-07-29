@@ -21,7 +21,7 @@ this file is that nobody has to rediscover *why* a line of config is there.
 | W1 | Agent publishes `kind:0` only, so it is mentionable but unbadged | [#2987](https://github.com/block/buzz/issues/2987), [#3277](https://github.com/block/buzz/issues/3277) | `shouldHideAgentFromMentions` reaches its invocability branch |
 | W2 | Agent must create its own channel; it cannot be added to an existing one | not filed (see `reconcile-channels`) | Relay or CLI gains a membership grant for an existing pubkey |
 | W3 | `garage.region` pinned to `us-east-1` | not filed | Relay exposes an S3 region setting |
-| W4 | `BUZZ_GIT_CONFORMANCE_PROBE=false`; Buzz git hosting unused | not filed (also Garage) | Garage ships conditional writes, or the probe becomes granular |
+| W4 | `BUZZ_GIT_CONFORMANCE_PROBE=false` - **blocks the client's Projects feature** | not filed (watch **Garage** too) | An object store with `If-Match` CAS, or a per-feature probe |
 | W5 | Relay runs from the upstream container image, not built from source | not filed | Upstream publishes the frontend assets, or a source build produces the web surface |
 | W6 | Postgres needs `enableTCPIP` + a loopback `trust` rule | gated on W5 | The relay no longer runs in a container |
 
@@ -91,15 +91,44 @@ to whatever the object store prefers.
 
 ### W4 - Garage cannot back the git object store
 
-The relay's startup conformance probe requires atomic compare-and-swap (`If-Match`). On
-Garage every racer wins, so the probe fails and the relay refuses to start. We set
-`BUZZ_GIT_CONFORMANCE_PROBE=false`, which is safe here because Buzz's git hosting is unused
-(upstream still lists it as unbuilt). Media and attachments are unaffected - they need no
-conditional writes.
+**This blocks the client's Projects feature, not just an optional extra.** Treat it as the
+highest-impact row here.
 
-**Clear when** either side moves: Garage implementing conditional writes, or the probe
-becoming per-feature rather than all-or-nothing. Then git hosting becomes available without
-swapping object stores. Worth re-checking on **both** projects, not just Buzz.
+Git hosting is **built and live** on the relay - do not read this row as "unimplemented".
+The routes exist and are served:
+
+```
+/git/{owner}/{repo}/info/refs        # 401 (not 404) - route present, auth required
+/git/{owner}/{repo}/git-upload-pack
+/git/{owner}/{repo}/git-receive-pack
+```
+
+Auth is NIP-98: the endpoint answers `WWW-Authenticate: Nostr realm="buzz"`, so a plain
+`git clone` cannot authenticate - the desktop client signs those requests itself.
+
+The blocker is the object store. The relay's startup conformance probe requires atomic
+compare-and-swap (`If-Match`); on Garage every racer wins, so it fails. Verified
+empirically on 2026-07-29 with Garage 1.3.1: setting `BUZZ_GIT_CONFORMANCE_PROBE=true` and
+restarting made the relay **fail to start**, and it came back only once the flag was
+returned to `false`. So the flag is not a preference - it is the only way the relay runs on
+this object store.
+
+The consequence is user-visible: the client validates that a repository's clone URL points
+at a Buzz git repository, rejecting external URLs with *"clone URL must point at a Buzz git
+repository"*. A NIP-34 announcement pointing at GitHub is therefore accepted by the relay
+but refused by the client. Announcing a `https://<domain>/git/<owner-pubkey>/<repo>` URL
+instead only helps once that repo can actually be pushed - which is what this row blocks.
+
+Media and attachments are unaffected; they need no conditional writes.
+
+**Clear when** any of these land:
+
+- Garage implements conditional writes (`If-Match`) - check **Garage releases**, not Buzz.
+- The probe becomes per-feature, so a relay can run with git hosting disabled but
+  everything else intact.
+- We move the object store to one with conditional-write semantics (recent MinIO, Ceph RGW,
+  or real S3, which has supported conditional writes since late 2024). This is the only
+  option entirely in our own hands, and it is a deliberate swap rather than a flag.
 
 ### W5 / W6 - the relay is an image, the agent is built
 
