@@ -20,8 +20,6 @@ this file is that nobody has to rediscover *why* a line of config is there.
 |---|---|---|---|
 | W1 | Agent publishes `kind:0` only, so it is mentionable but unbadged | [#2987](https://github.com/block/buzz/issues/2987), [#3277](https://github.com/block/buzz/issues/3277) | `shouldHideAgentFromMentions` reaches its invocability branch |
 | W2 | Agent must create its own channel; it cannot be added to an existing one | not filed (see `reconcile-channels`) | Relay or CLI gains a membership grant for an existing pubkey |
-| W3 | `garage.region` pinned to `us-east-1` | not filed | Relay exposes an S3 region setting |
-| W4 | `BUZZ_GIT_CONFORMANCE_PROBE=false` - **blocks the client's Projects feature** | not filed (watch **Garage** too) | An object store with `If-Match` CAS, or a per-feature probe |
 | W5 | Relay runs from the upstream container image, not built from source | not filed | Upstream publishes the frontend assets, or a source build produces the web surface |
 | W6 | Postgres needs `enableTCPIP` + a loopback `trust` rule | gated on W5 | The relay no longer runs in a container |
 
@@ -79,56 +77,35 @@ add-member`-style verb, or `reconcile-channels` gaining a force mode that re-emi
 from the table). Then agents can join the channels people already use, and the "agent
 creates its own channel" step disappears from setup.
 
-### W3 - the relay's S3 region is not configurable
+### W3 / W4 - resolved 2026-07-29 by moving off Garage
 
-The relay signs S3 requests for `us-east-1` and exposes no region setting. Garage validates
-the signature scope (MinIO does not), so if Garage advertises a different region every
-request fails with `AuthorizationHeaderMalformed`. Hence `services.buzzer.garage.region`
-defaults to `us-east-1` and should not be changed.
+Both rows were Garage limitations, and both went away when the object store changed to
+SeaweedFS. Kept here because the reasoning is the useful part.
 
-**Clear when** the relay gains a region option: the pin can go, and the option can default
-to whatever the object store prefers.
+**W4 was the important one: it blocked the client's Projects feature.** Buzz's git object
+store requires atomic compare-and-swap (`If-Match`). Garage cannot provide it - not as a
+missing feature but by design, since it has no consensus algorithm, and its own
+documentation says if-none-match cannot be used for mutual exclusion between concurrent
+writers. Verified here: with `BUZZ_GIT_CONFORMANCE_PROBE=true` the relay refused to start
+on Garage 1.3.1. Waiting for upstream Garage would have been waiting forever.
 
-### W4 - Garage cannot back the git object store
-
-**This blocks the client's Projects feature, not just an optional extra.** Treat it as the
-highest-impact row here.
-
-Git hosting is **built and live** on the relay - do not read this row as "unimplemented".
-The routes exist and are served:
+On SeaweedFS 4.40 the same probe passes:
 
 ```
-/git/{owner}/{repo}/info/refs        # 401 (not 404) - route present, auth required
-/git/{owner}/{repo}/git-upload-pack
-/git/{owner}/{repo}/git-receive-pack
+running git object-store conformance probe (A3 gate)   race_width=32 race_rounds=3
+git object-store backend admitted: A3 conformance probe passed   transport_drops=0
 ```
 
-Auth is NIP-98: the endpoint answers `WWW-Authenticate: Nostr realm="buzz"`, so a plain
-`git clone` cannot authenticate - the desktop client signs those requests itself.
+So the probe now runs enabled, and relay-hosted git works. SeaweedFS was chosen over MinIO
+(licence trajectory; nixpkgs marks its package insecure) and Ceph RGW (correct, but a
+distributed storage system is the wrong weight for a single host). Its one known conditional
+-write bug affects versioned + object-locked buckets only, which this deployment does not
+use.
 
-The blocker is the object store. The relay's startup conformance probe requires atomic
-compare-and-swap (`If-Match`); on Garage every racer wins, so it fails. Verified
-empirically on 2026-07-29 with Garage 1.3.1: setting `BUZZ_GIT_CONFORMANCE_PROBE=true` and
-restarting made the relay **fail to start**, and it came back only once the flag was
-returned to `false`. So the flag is not a preference - it is the only way the relay runs on
-this object store.
-
-The consequence is user-visible: the client validates that a repository's clone URL points
-at a Buzz git repository, rejecting external URLs with *"clone URL must point at a Buzz git
-repository"*. A NIP-34 announcement pointing at GitHub is therefore accepted by the relay
-but refused by the client. Announcing a `https://<domain>/git/<owner-pubkey>/<repo>` URL
-instead only helps once that repo can actually be pushed - which is what this row blocks.
-
-Media and attachments are unaffected; they need no conditional writes.
-
-**Clear when** any of these land:
-
-- Garage implements conditional writes (`If-Match`) - check **Garage releases**, not Buzz.
-- The probe becomes per-feature, so a relay can run with git hosting disabled but
-  everything else intact.
-- We move the object store to one with conditional-write semantics (recent MinIO, Ceph RGW,
-  or real S3, which has supported conditional writes since late 2024). This is the only
-  option entirely in our own hands, and it is a deliberate swap rather than a flag.
+**W3** was that the relay signs S3 requests for `us-east-1` and exposes no region setting,
+while Garage validated the signature scope. SeaweedFS does not, so the pin is unnecessary
+and the `region` option is gone. If the object store is ever changed again, re-check this
+first - it fails as `AuthorizationHeaderMalformed`, which does not obviously point at region.
 
 ### W5 / W6 - the relay is an image, the agent is built
 
@@ -149,8 +126,8 @@ Until then the pins are bumped by hand - recipe in the README under *Updating th
 
 ## Worth filing upstream
 
-Not blocking anything, but each would let this module get simpler. W2 and W3 above are the
-strongest candidates; also:
+Not blocking anything, but each would let this module get simpler. W2 above is the
+strongest candidate; also:
 
 - **Community rename / rehost.** Communities are keyed to the hostname, so changing
   `domain` after first run makes the relay create a second, empty community instead of
@@ -171,11 +148,18 @@ Not upstream's problem, and they will not clear - but they cost real time to dia
 - **Restore dumps as the database owner, not as `postgres`.** Objects restored by a
   superuser stay owned by it, and the relay then fails with
   `permission denied for table _sqlx_migrations`.
+- **SeaweedFS's volume server defaults to port 8080, which the relay also binds.** Left at
+  the default the volume server never starts and the S3 gateway serves nothing, with no
+  obvious error. This module moves it to 8081.
+- **`weed` cannot read a root-owned 0600 secrets file.** It runs unprivileged, so the S3
+  identities file is passed via systemd `LoadCredential` rather than by loosening the file's
+  permissions.
 - **Redis state is disposable.** Everything the relay keeps in Redis is TTL'd - NIP-98 auth
   nonces, presence, rate-limit counters - so the store can be flushed or rebuilt without
   data loss. That also means the implementation can be swapped (Redis, Valkey, any
   wire-compatible fork) with no migration: stop, clear any `dump.rdb` the previous
   implementation wrote, start. An RDB written by one is not always readable by the other,
   and that is the only thing that bites.
-- **Garage rather than MinIO**: nixpkgs marks its MinIO package insecure, and Garage is a
-  lighter single-node S3.
+- **SeaweedFS rather than Garage or MinIO**: it is the lightweight option that implements
+  S3 conditional writes, which Buzz's git object store requires (see W3/W4). Apache-2.0,
+  so no licence trajectory to worry about.
