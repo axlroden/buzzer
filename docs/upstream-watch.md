@@ -142,8 +142,11 @@ Not upstream's problem, and they will not clear - but they cost real time to dia
 - **Restore dumps as the database owner, not as `postgres`.** Objects restored by a
   superuser stay owned by it, and the relay then fails with
   `permission denied for table _sqlx_migrations`.
-- **Valkey rather than Redis**: BSD-licensed fork versus a source-available Redis. It ships
-  `redis-server` compatibility symlinks, so the NixOS redis module drives it unchanged and
-  `REDIS_URL` needs no adjustment.
+- **Redis state is disposable.** Everything the relay keeps in Redis is TTL'd - NIP-98 auth
+  nonces, presence, rate-limit counters - so the store can be flushed or rebuilt without
+  data loss. That also means the implementation can be swapped (Redis, Valkey, any
+  wire-compatible fork) with no migration: stop, clear any `dump.rdb` the previous
+  implementation wrote, start. An RDB written by one is not always readable by the other,
+  and that is the only thing that bites.
 - **Garage rather than MinIO**: nixpkgs marks its MinIO package insecure, and Garage is a
   lighter single-node S3.
