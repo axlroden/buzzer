@@ -1,5 +1,5 @@
 # NixOS module for a single-host, self-hosted Buzz workspace:
-# relay + Postgres + Valkey + Garage (S3) + optional headless agent and Cloudflare tunnel.
+# relay + Postgres + Redis + Garage (S3) + optional headless agent and Cloudflare tunnel.
 #
 # Everything binds to loopback; the only intended ingress is the tunnel (or a reverse
 # proxy you place in front yourself).
@@ -60,10 +60,10 @@ in
       description = "Postgres database and owning role.";
     };
 
-    valkey.passwordFile = lib.mkOption {
+    redis.passwordFile = lib.mkOption {
       type = lib.types.path;
-      example = "/etc/buzz/valkey.pass";
-      description = "File containing the Valkey password.";
+      example = "/etc/buzz/redis.pass";
+      description = "File containing the Redis password.";
     };
 
     garage = {
@@ -157,16 +157,14 @@ in
       settings.listen_addresses = lib.mkForce "127.0.0.1";
     };
 
-    # Valkey, not Redis: Valkey is the BSD-licensed fork, whereas current Redis ships
-    # under a source-available licence. There is no services.valkey module, but Valkey
-    # installs redis-server compatibility symlinks, so the redis module drives it as-is
-    # and the relay's REDIS_URL works unchanged (the wire protocol is the same).
-    services.redis.package = pkgs.valkey;   # per-server `package` does not exist
+    # Stock Redis via the NixOS module. Everything the relay keeps here is ephemeral and
+    # TTL'd - NIP-98 auth nonces, presence, rate-limit counters - so the store can be lost
+    # or rebuilt without data loss, and swapping the implementation needs no migration.
     services.redis.servers.buzz = {
       enable = true;
       bind = "127.0.0.1";
       port = 6379;
-      requirePassFile = cfg.valkey.passwordFile;
+      requirePassFile = cfg.redis.passwordFile;
     };
 
     # Garage rather than MinIO: nixpkgs marks its MinIO insecure, and Garage is a

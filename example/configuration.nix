@@ -12,7 +12,7 @@
     relay.image = "ghcr.io/block/buzz:main";
     relay.environmentFile = "/etc/buzz/relay.env";
 
-    valkey.passwordFile = "/etc/buzz/valkey.pass";
+    redis.passwordFile  = "/etc/buzz/redis.pass";
     garage.environmentFile = "/etc/buzz/garage.env";
 
     agent.enable = true;

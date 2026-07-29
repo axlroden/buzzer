@@ -13,7 +13,7 @@ agent is a permanent member of the workspace rather than a feature of one machin
 | Component | How |
 |---|---|
 | Postgres | native NixOS service, loopback only |
-| Valkey | native NixOS service, loopback only |
+| Redis | native NixOS service, loopback only |
 | Garage (S3) | native NixOS service, loopback only |
 | Buzz relay | upstream container image, host networking |
 | `buzz-acp` + `buzz` CLI | **built from source** by this flake |
@@ -36,7 +36,7 @@ Only the ingress is reachable from outside the host; every data service binds to
     enable = true;
     domain = "buzz.example.com";
     relay.environmentFile   = "/etc/buzz/relay.env";
-    valkey.passwordFile     = "/etc/buzz/valkey.pass";
+    redis.passwordFile      = "/etc/buzz/redis.pass";
     garage.environmentFile  = "/etc/buzz/garage.env";
     agent.enable            = true;
     agent.environmentFile   = "/etc/buzz/agent.env";
@@ -60,7 +60,7 @@ before the first switch.
 |---|---|
 | `relay.env` | `DATABASE_URL`, `REDIS_URL`, `BUZZ_S3_*`, `BUZZ_RELAY_PRIVATE_KEY`, `RELAY_OWNER_PUBKEY`, `BUZZ_DOMAIN`, `BUZZ_CORS_ORIGINS`, `BUZZ_MEDIA_*` |
 | `agent.env` | `BUZZ_PRIVATE_KEY`, `BUZZ_RELAY_URL`, `BUZZ_ACP_AGENT_OWNER`, `BUZZ_ACP_AGENT_COMMAND`, plus the agent backend's own credential |
-| `valkey.pass`, `garage.env` | Valkey password; `GARAGE_RPC_SECRET` |
+| `redis.pass`, `garage.env` | Redis password; `GARAGE_RPC_SECRET` |
 | `credentials.json` | Cloudflare tunnel credentials |
 
 ## First-run bootstrap
