@@ -13,7 +13,7 @@
     relay.environmentFile = "/etc/buzz/relay.env";
 
     redis.passwordFile  = "/etc/buzz/redis.pass";
-    garage.environmentFile = "/etc/buzz/garage.env";
+    seaweedfs.s3ConfigFile = "/etc/buzz/seaweedfs-s3.json";
 
     agent.enable = true;
     agent.environmentFile = "/etc/buzz/agent.env";

@@ -14,7 +14,7 @@ agent is a permanent member of the workspace rather than a feature of one machin
 |---|---|
 | Postgres | native NixOS service, loopback only |
 | Redis | native NixOS service, loopback only |
-| Garage (S3) | native NixOS service, loopback only |
+| SeaweedFS (S3) | systemd unit shipped by this flake, loopback only |
 | Buzz relay | upstream container image, host networking |
 | `buzz-acp` + `buzz` CLI | **built from source** by this flake |
 | Ingress | optional Cloudflare tunnel |
@@ -37,7 +37,7 @@ Only the ingress is reachable from outside the host; every data service binds to
     domain = "buzz.example.com";
     relay.environmentFile   = "/etc/buzz/relay.env";
     redis.passwordFile      = "/etc/buzz/redis.pass";
-    garage.environmentFile  = "/etc/buzz/garage.env";
+    seaweedfs.s3ConfigFile  = "/etc/buzz/seaweedfs-s3.json";
     agent.enable            = true;
     agent.environmentFile   = "/etc/buzz/agent.env";
     backup.enable           = true;   # nightly pg_dump, pruned after 14 days
@@ -60,21 +60,20 @@ before the first switch.
 |---|---|
 | `relay.env` | `DATABASE_URL`, `REDIS_URL`, `BUZZ_S3_*`, `BUZZ_RELAY_PRIVATE_KEY`, `RELAY_OWNER_PUBKEY`, `BUZZ_DOMAIN`, `BUZZ_CORS_ORIGINS`, `BUZZ_MEDIA_*` |
 | `agent.env` | `BUZZ_PRIVATE_KEY`, `BUZZ_RELAY_URL`, `BUZZ_ACP_AGENT_OWNER`, `BUZZ_ACP_AGENT_COMMAND`, plus the agent backend's own credential |
-| `redis.pass`, `garage.env` | Redis password; `GARAGE_RPC_SECRET` |
+| `redis.pass`, `seaweedfs-s3.json` | Redis password; SeaweedFS S3 identities (access key + secret) |
 | `credentials.json` | Cloudflare tunnel credentials |
 
 ## First-run bootstrap
 
-1. **Garage layout.** A fresh node has no layout and will refuse S3 requests until one is
-   applied:
+1. **S3 bucket.** Create the identities file the relay authenticates with, then the bucket:
    ```bash
-   garage status                                   # note the node id
-   garage layout assign -z dc1 -c 10G <node-id>
-   garage layout apply --version 1
-   garage bucket create <bucket>
-   garage key create buzz                          # put the key/secret in relay.env
-   garage bucket allow --read --write <bucket> --key buzz
+   # /etc/buzz/seaweedfs-s3.json  (0600, root-owned - systemd LoadCredential hands it to weed)
+   {"identities":[{"name":"buzz",
+     "credentials":[{"accessKey":"<key>","secretKey":"<secret>"}],
+     "actions":["Admin","Read","Write","List","Tagging"]}]}
    ```
+   Put the same key/secret in `relay.env` as `BUZZ_S3_ACCESS_KEY` / `BUZZ_S3_SECRET_KEY`,
+   then create the bucket with any S3 client, e.g. `rclone mkdir <remote>:<bucket>`.
 2. **Relay membership.** The relay is closed by default
    (`BUZZ_REQUIRE_RELAY_MEMBERSHIP=true`): a pubkey that is not a member can neither read
    nor write. Add yourself and any agent:

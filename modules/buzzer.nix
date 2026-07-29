@@ -1,5 +1,5 @@
 # NixOS module for a single-host, self-hosted Buzz workspace:
-# relay + Postgres + Redis + Garage (S3) + optional headless agent and Cloudflare tunnel.
+# relay + Postgres + Redis + SeaweedFS (S3) + optional headless agent and Cloudflare tunnel.
 #
 # Everything binds to loopback; the only intended ingress is the tunnel (or a reverse
 # proxy you place in front yourself).
@@ -66,25 +66,27 @@ in
       description = "File containing the Redis password.";
     };
 
-    garage = {
-      environmentFile = lib.mkOption {
+    seaweedfs = {
+      s3Port = lib.mkOption {
+        type = lib.types.port;
+        default = 3900;
+        description = "Loopback port the S3 API listens on.";
+      };
+      dataDir = lib.mkOption {
+        type = lib.types.str;
+        default = "/var/lib/seaweedfs";
+        description = "Where volumes, filer metadata and S3 objects are stored.";
+      };
+      s3ConfigFile = lib.mkOption {
         type = lib.types.path;
-        example = "/etc/buzz/garage.env";
-        description = "Garage environment file supplying GARAGE_RPC_SECRET.";
-      };
-      capacity = lib.mkOption {
-        type = lib.types.str;
-        default = "10G";
-        description = "Capacity advertised when bootstrapping the single-node layout.";
-      };
-      region = lib.mkOption {
-        type = lib.types.str;
-        default = "us-east-1";
+        example = "/etc/buzz/seaweedfs-s3.json";
         description = ''
-          S3 region Garage advertises. The relay signs requests for us-east-1 and does
-          not expose a region setting, and Garage (unlike MinIO) validates the signature
-          scope - a mismatch fails with AuthorizationHeaderMalformed. Leave as-is unless
-          the relay gains a region option.
+          SeaweedFS S3 identities file, kept out of the Nix store because it holds the
+          access key and secret the relay authenticates with. Minimal shape:
+
+          {"identities":[{"name":"buzz",
+            "credentials":[{"accessKey":"...","secretKey":"..."}],
+            "actions":["Admin","Read","Write","List","Tagging"]}]}
         '';
       };
     };
@@ -167,22 +169,60 @@ in
       requirePassFile = cfg.redis.passwordFile;
     };
 
-    # Garage rather than MinIO: nixpkgs marks its MinIO insecure, and Garage is a
-    # lighter single-node S3. NOTE: a fresh node has no layout, so S3 calls fail until
-    # the one-time bootstrap in the README is run.
-    services.garage = {
-      enable = true;
-      package = pkgs.garage;
-      settings = {
-        replication_factor = 1;
-        db_engine = "lmdb";
-        metadata_dir = "/var/lib/garage/meta";
-        data_dir = "/var/lib/garage/data";
-        rpc_bind_addr = "127.0.0.1:3901";
-        rpc_public_addr = "127.0.0.1:3901";
-        s3_api = { api_bind_addr = "127.0.0.1:3900"; s3_region = cfg.garage.region; };
+    # SeaweedFS rather than Garage or MinIO.
+    #
+    # Buzz's git object store needs atomic compare-and-swap (`If-Match`). Garage cannot
+    # provide it: it has no consensus algorithm, so conditional writes are architecturally
+    # out of reach rather than merely unimplemented, and the relay refuses to start with its
+    # conformance probe enabled. SeaweedFS implements conditional writes on standard
+    # (non-versioned) buckets and is Apache-2.0, avoiding MinIO's licence trajectory.
+    #
+    # `weed server` runs master, volume, filer and the S3 gateway in one process - the right
+    # shape for a single host. Everything binds to loopback.
+    users.users.seaweedfs = {
+      isSystemUser = true;
+      group = "seaweedfs";
+      home = cfg.seaweedfs.dataDir;
+      createHome = true;
+    };
+    users.groups.seaweedfs = { };
+
+    systemd.services.seaweedfs = {
+      description = "SeaweedFS S3 object storage";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "network.target" ];
+      serviceConfig = {
+        ExecStart = lib.concatStringsSep " " [
+          "${pkgs.seaweedfs}/bin/weed server"
+          "-dir=${cfg.seaweedfs.dataDir}"
+          "-ip=127.0.0.1 -ip.bind=127.0.0.1"
+          "-master.port=9333"
+          # The volume server defaults to 8080, which the relay in this very module already
+          # binds. Left alone, the volume server never comes up and the S3 gateway serves
+          # nothing.
+          "-volume.port=8081"
+          "-filer -filer.port=8888"
+          "-s3 -s3.port=${toString cfg.seaweedfs.s3Port}"
+          # Read via systemd's credential mechanism so the file can stay root-owned 0600:
+          # weed runs unprivileged and cannot open it directly.
+          "-s3.config=%d/s3config"
+        ];
+        LoadCredential = [ "s3config:${cfg.seaweedfs.s3ConfigFile}" ];
+        User = "seaweedfs";
+        Group = "seaweedfs";
+        Restart = "always";
+        RestartSec = 5;
+        NoNewPrivileges = true;
+        ProtectSystem = "strict";
+        ReadWritePaths = [ cfg.seaweedfs.dataDir ];
+        PrivateTmp = true;
+        ProtectHome = true;
+        ProtectControlGroups = true;
+        ProtectKernelModules = true;
+        ProtectKernelTunables = true;
+        RestrictSUIDSGID = true;
+        LockPersonality = true;
       };
-      environmentFile = cfg.garage.environmentFile;
     };
 
     # ------------------------------------------------------------------ relay
@@ -197,7 +237,7 @@ in
       environmentFiles = [ cfg.relay.environmentFile ];
     };
     systemd.services.docker-buzz-relay = {
-      after = [ "postgresql.service" "redis-buzz.service" "garage.service" ];
+      after = [ "postgresql.service" "redis-buzz.service" "seaweedfs.service" ];
       requires = [ "postgresql.service" ];
     };
 
@@ -294,7 +334,7 @@ in
       };
     };
 
-    environment.systemPackages = [ buzz-agent-tools pkgs.garage pkgs.postgresql_17 ];
+    environment.systemPackages = [ buzz-agent-tools pkgs.seaweedfs pkgs.postgresql_17 ];
 
     # claude-code and the ACP adapter are unfree.
     nixpkgs.config.allowUnfreePredicate = pkg:
