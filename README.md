@@ -234,62 +234,20 @@ Identity is Buzz's own and is cryptographic: NIP-42 proves possession of a priva
 relay membership is an explicit allowlist. It behaves like SSH with `authorized_keys` - the
 endpoint may be public, but it is useless without a registered key.
 
-## Gotchas
+## Operating notes
 
-- **An agent cannot be added to an existing channel via any API.** Writing the
-  `channel_members` table directly has no effect: the relay serves membership from *events*
-  (kind 39002), so the harness keeps reporting `discovered 0 channel(s)`. Have the agent
-  create its own channel instead - the creator is automatically a member:
-  `buzz channels create --name <name> --type stream --visibility open`
-- **An agent with no `kind:0` profile is invisible** to the client's member search and
-  cannot be @mentioned: `buzz users set-profile --name <name> --about ...`
-- **A self-hosted agent cannot be both badged and mentionable today.** The client's "agent"
-  badge for desktop-managed agents comes from a `kind:30177` registration signed by the
-  *owner* (its `d` tag is the agent's pubkey). For an *external* agent the declaration is
-  `kind:10100` - but publishing it makes the agent **un-mentionable**, because the
-  invocability branch of `shouldHideAgentFromMentions` is unreachable
-  ([block/buzz#2987](https://github.com/block/buzz/issues/2987), open). So a headless agent
-  should publish `kind:0` only: it then appears as an ordinary member - unbadged, but
-  mentionable and fully functional, which is what this module assumes.
-  Note `buzz agents draft-create` does not register an existing identity; it proposes a
-  *new desktop-managed* agent. And desktop-managed agents are only mentionable from the
-  machine running them ([#3277](https://github.com/block/buzz/issues/3277), open) - which is
-  the reason to run one server-side in the first place.
-- **Changing `domain` after first run forks the workspace.** Communities are keyed to the
-  hostname, so a new one makes the relay create a second, empty community instead of moving
-  the existing one. Repoint the `communities.host` row instead.
-- **Static addressing: match the NIC by `Name`.** `matchConfig.Type = "ether"` also matches
-  container veth interfaces, so networkd assigns them the host's address and a duplicate
-  default route, and container egress dies.
-- **`nixos-rebuild ... | tail` hides failures** - the pipeline returns `tail`'s exit status,
-  so a failed build looks successful. Redirect to a file and check `$?`.
-- **Garage cannot back Buzz's git object store.** The relay's startup conformance probe
-  requires atomic compare-and-swap (`If-Match`); on Garage every racer wins, so the probe
-  fails and the relay refuses to start. Set `BUZZ_GIT_CONFORMANCE_PROBE=false` if you do
-  not use Buzz's git hosting (upstream still lists it as unbuilt), or use an object store
-  with conditional-write semantics if you do. Media/attachments work fine either way.
-- **Garage validates the S3 signature region; MinIO does not.** The relay signs for
-  `us-east-1` and exposes no region setting, so Garage must advertise the same region or
-  every request fails with `AuthorizationHeaderMalformed`.
-- **Restore dumps as the database owner, not as `postgres`.** Objects restored by a
-  superuser stay owned by it, and the relay then fails with
-  `permission denied for table _sqlx_migrations`.
-- **The relay container shares the host network namespace but not its mounts**, so it
-  cannot reach Postgres over the unix socket - it needs `enableTCPIP` and a loopback host
-  rule.
-- Valkey is used rather than Redis (BSD vs source-available licence); it provides
-  `redis-server` compatibility symlinks, so the NixOS redis module drives it unchanged.
-  Garage is used rather than MinIO, whose nixpkgs package is marked insecure.
+Every workaround this module carries - and what has to happen upstream before it can be
+deleted - is in **[docs/upstream-watch.md](docs/upstream-watch.md)**, along with the
+deployment traps that cost the most time to diagnose. Read it before changing the object
+store, the domain, or the agent's identity events.
 
-## Why the relay is an image but the agent is built
+## Updating the pins
 
-Upstream publishes a container image for the **relay** only, and the relay serves bundled
-web/admin assets produced by the frontend build - compiling just its Rust binary would
-leave it without a web surface. The agent-side crates (`buzz-acp`, `buzz-cli`) have no
-published artifacts at all, so this flake builds them from a pinned source revision with a
-vendored `Cargo.lock`.
+The relay runs from the upstream image while the agent-side crates are built from source;
+[docs/upstream-watch.md](docs/upstream-watch.md) explains why, and what would let both be
+built the same way.
 
-To update: bump `rev`/`hash` in `pkgs/buzz-agent-tools.nix`
+Bump `rev`/`hash` in `pkgs/buzz-agent-tools.nix`
 (`nix flake prefetch --json github:block/buzz/<rev> | jq -r .hash`), copy that revision's
 `Cargo.lock` into `pkgs/`, and re-pin `relay.image` to the matching digest.
 
@@ -297,9 +255,10 @@ To update: bump `rev`/`hash` in `pkgs/buzz-agent-tools.nix`
 
 The agent runs as an unprivileged user under systemd hardening (`NoNewPrivileges`,
 `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, writes confined to its state
-directory). It still runs its backend with permission prompts disabled, so treat it as
-capable of running any tool it is given - grant repository or production credentials
-deliberately, not by default.
+directory). It still runs its backend with permission prompts disabled - see
+[Permissions and blast radius](#permissions-and-blast-radius) - so treat it as capable of
+running any tool it is given, and grant repository or production credentials deliberately
+rather than by default.
 
 ## Status
 
