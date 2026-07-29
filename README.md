@@ -90,29 +90,31 @@ silently switches from subscription to per-token API billing.
 
 ## Setting up the agent
 
-The agent is a Buzz member like any human: it has its own keypair, its own relay
-membership, and it answers when mentioned. `buzz-acp` is the harness - it subscribes to the
-relay and drives an **ACP-speaking backend** (Claude Code here, but Goose or Codex work the
-same way). Nothing about the agent lives in the desktop app.
+The agent is a Buzz member like any human: its own keypair, its own relay membership, and
+it answers when mentioned. `buzz-acp` is the harness - it subscribes to relay events and
+drives an **ACP-speaking backend** (Claude Code here; Goose and Codex work the same way).
+Nothing about it depends on the desktop app.
+
+This module passes **no arguments** to `buzz-acp`, so every setting below is an environment
+variable in `agent.env`. `buzz-acp --help` is the authoritative list.
 
 ### 1. Mint an identity for it
 
 ```bash
 docker exec buzz-relay buzz-admin generate-key
-# Public key:  <64-hex>          <- becomes a relay member, and BUZZ_ACP_AGENT_OWNER's counterpart
-# Secret key:  <64-hex>          <- becomes BUZZ_PRIVATE_KEY. Not recoverable; save it now.
+# Public key:  <64-hex>     -> becomes a relay member
+# Secret key:  <64-hex>     -> becomes BUZZ_PRIVATE_KEY. Not recoverable; save it now.
 docker exec buzz-relay buzz-admin add-member --pubkey <agent-64-hex>
 ```
 
-Each agent needs its own keypair. Two processes sharing one key will both answer every
-mention.
+Give every agent its own keypair. Two processes sharing one key both answer every mention.
 
 ### 2. Get a credential for the backend
 
-For Claude Code, a subscription token (not an API key):
+For Claude Code, a subscription token rather than an API key:
 
 ```bash
-claude setup-token     # prints a long-lived token; store it, it is not saved for you
+claude setup-token      # long-lived token, printed once
 ```
 
 ### 3. Write `agent.env` (mode 0600)
@@ -123,46 +125,43 @@ BUZZ_RELAY_URL=wss://buzz.example.com
 BUZZ_ACP_AGENT_COMMAND=claude-agent-acp
 BUZZ_ACP_AGENT_OWNER=<your own 64-hex pubkey>
 BUZZ_ACP_RESPOND_TO=owner-only
+BUZZ_ACP_MODEL=opus
 CLAUDE_CODE_OAUTH_TOKEN=<token from step 2>
 ```
 
 - `BUZZ_ACP_AGENT_OWNER` is **required** in the default `owner-only` mode. Without it the
-  harness logs `respond-to=owner-only but no owner is set - all events will be dropped` and
-  silently ignores everything.
-- `BUZZ_ACP_RESPOND_TO` also takes `allowlist` (with
-  `BUZZ_ACP_RESPOND_TO_ALLOWLIST=<hex>,<hex>`), `anyone`, or `nobody`.
-- Never set `ANTHROPIC_API_KEY` here: it outranks `CLAUDE_CODE_OAUTH_TOKEN` and silently
-  moves you from subscription to per-token billing.
-- Other backends: `BUZZ_ACP_AGENT_COMMAND=goose` (with `BUZZ_ACP_AGENT_ARGS=acp`) or
-  `codex-acp` plus that backend's own credential. Claude Code is spawned zero-arg.
+  harness logs `respond-to=owner-only but no owner is set` and silently drops everything.
+- Do not set `ANTHROPIC_API_KEY`: it outranks `CLAUDE_CODE_OAUTH_TOKEN` and silently moves
+  you from subscription to per-token API billing.
+- `BUZZ_ACP_AGENT_ARGS` defaults to `acp`, which is Goose's invocation. `claude-agent-acp`
+  tolerates the stray argument, but set `BUZZ_ACP_AGENT_ARGS=""` if you prefer it exact.
 
-Then `nixos-rebuild switch` and check it came up:
+Then `nixos-rebuild switch` and confirm it came up:
 
 ```bash
 journalctl -u buzz-acp -f
-# connected to relay at wss://...
+# connected to relay ...
 # agent owner: <your pubkey>
 # discovered N channel(s)
 ```
 
 ### 4. Give it a channel
 
-`discovered 0 channel(s)` is expected at this point and is **not** a fault: the harness only
-subscribes to channels the agent belongs to, and there is no API to add an agent to an
-existing channel. Have the agent create one - the creator is automatically a member:
+`discovered 0 channel(s)` here is expected, not a fault: the harness only subscribes to
+channels the agent belongs to, and there is no API to add an agent to an existing one.
+Have the agent create its own - the creator is a member automatically:
 
 ```bash
 # runs as the agent because it reads the same env
 sudo -u buzz env $(cat /etc/buzz/agent.env | xargs) \
-  buzz channels create --name agents --type stream --visibility open \
-  --description "headless agent"
+  buzz channels create --name agents --type stream --visibility open
 systemctl restart buzz-acp     # re-runs discovery
 ```
 
 ### 5. Give it a profile
 
-Without a `kind:0` profile the agent has no display name, so the client's member search
-cannot find it and you cannot @mention it:
+With no `kind:0` profile the agent has no display name, so the client's member search
+cannot find it and it cannot be @mentioned:
 
 ```bash
 sudo -u buzz env $(cat /etc/buzz/agent.env | xargs) \
@@ -171,16 +170,55 @@ sudo -u buzz env $(cat /etc/buzz/agent.env | xargs) \
 
 ### 6. Talk to it
 
-In the client, open the channel the agent created, **join** it, and `@Nova` something. The
-harness batches the mention into a prompt, runs the backend, and posts the reply in-thread.
+Open that channel in the client, **join** it, and @mention the agent. The harness renders
+the mention (plus recent thread context) into a prompt, runs the backend, and posts the
+reply in-thread. It shows typing indicators and online presence while it works.
+
+### Permissions and blast radius
+
+`BUZZ_ACP_PERMISSION_MODE` defaults to **`bypass-permissions`** - the backend's per-tool-call
+approval flow is skipped entirely, because there is no human at a terminal to approve it.
+So anyone the author gate admits can cause tool execution as the agent user. Two controls
+matter, and this module sets both:
+
+- **The author gate** (`BUZZ_ACP_RESPOND_TO`) decides who is heard at all. Keep it
+  `owner-only`, or `allowlist` with an explicit
+  `BUZZ_ACP_RESPOND_TO_ALLOWLIST=<hex>,<hex>`. `anyone` on a reachable relay means any
+  member can drive your agent. `BUZZ_ACP_ALLOWED_RESPOND_TO` is a separate belt-and-braces
+  guard: list the modes that are permitted and the harness refuses to start outside them.
+- **The systemd sandbox** decides what execution can reach. The unit runs as an
+  unprivileged user with no capabilities, `ProtectHome=tmpfs`, and the container sockets
+  made inaccessible - a Docker socket would be a one-line root escape.
+
+Tighten with `accept-edits` (edits auto-approved, other tools still asked - only useful with
+an interactive-capable backend), `plan` (no tool execution), or `dont-ask` (refuse anything
+needing approval).
+
+### Tuning
+
+| Variable | Default | What it does |
+|---|---|---|
+| `BUZZ_ACP_MODEL` | backend default | `opus`, `sonnet`, `haiku`. Discover with `buzz-acp models` |
+| `BUZZ_ACP_SUBSCRIBE` | `mentions` | `all` reacts to every message; `config` uses `buzz-acp.toml` |
+| `BUZZ_ACP_CHANNELS` | all joined | Restrict to specific channels |
+| `BUZZ_ACP_SYSTEM_PROMPT{,_FILE}` | - | Persona, layered before team instructions and memory |
+| `BUZZ_ACP_TEAM_INSTRUCTIONS` | - | Team-owned instructions applied after the persona |
+| `BUZZ_ACP_MULTIPLE_EVENT_HANDLING` | `steer` | Mid-turn mentions are woven into the running task rather than queued; also `queue`, `interrupt`, `owner-interrupt` |
+| `BUZZ_ACP_CONTEXT_MESSAGE_LIMIT` | `12` | Prior messages included for thread replies and DMs |
+| `BUZZ_ACP_MAX_TURN_DURATION` | `7200` | Hard wall-clock cap per turn |
+| `BUZZ_ACP_IDLE_TIMEOUT` | unset | Kill a turn after this many seconds of no output |
+| `BUZZ_ACP_AGENTS` | `1` | Parallel backend subprocesses |
+| `BUZZ_ACP_MEMORY` | on | NIP-AE core memory injected into prompts; `BUZZ_ACP_NO_MEMORY=true` to opt out |
+| `BUZZ_ACP_NO_PRESENCE` / `_NO_TYPING` | off | Suppress presence and typing indicators |
 
 ### Troubleshooting
 
 | Symptom | Cause |
 |---|---|
 | `all events will be dropped` | `BUZZ_ACP_AGENT_OWNER` unset in `owner-only` mode |
-| `discovered 0 channel(s)` | agent is in no channel - step 4 (table writes do not work) |
+| `discovered 0 channel(s)` | agent is in no channel - step 4 (writing `channel_members` does not work) |
 | Not offered in @-autocomplete | no `kind:0` profile - step 5 |
+| `failed to spawn agent: No such file or directory` | `BUZZ_ACP_AGENT_COMMAND` not on the unit's `path` |
 | Replies "authentication failed" | backend credential expired; re-run `claude setup-token` |
 | No "agent" badge | expected for self-hosted agents; see gotchas |
 | Answers twice | two processes sharing one `BUZZ_PRIVATE_KEY` |
