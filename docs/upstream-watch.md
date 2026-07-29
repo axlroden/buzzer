@@ -19,7 +19,7 @@ this file is that nobody has to rediscover *why* a line of config is there.
 | ID | Workaround | Watch | Clear when |
 |---|---|---|---|
 | W1 | Agent publishes `kind:0` only, so it is mentionable but unbadged | [#2987](https://github.com/block/buzz/issues/2987), [#3277](https://github.com/block/buzz/issues/3277) | `shouldHideAgentFromMentions` reaches its invocability branch |
-| W2 | Agent must create its own channel; it cannot be added to an existing one | not filed | Relay or CLI gains a membership grant for an existing pubkey |
+| W2 | Agent must create its own channel; it cannot be added to an existing one | not filed (see `reconcile-channels`) | Relay or CLI gains a membership grant for an existing pubkey |
 | W3 | `garage.region` pinned to `us-east-1` | not filed | Relay exposes an S3 region setting |
 | W4 | `BUZZ_GIT_CONFORMANCE_PROBE=false`; Buzz git hosting unused | not filed (also Garage) | Garage ships conditional writes, or the probe becomes granular |
 | W5 | Relay runs from the upstream container image, not built from source | not filed | Upstream publishes the frontend assets, or a source build produces the web surface |
@@ -62,9 +62,22 @@ automatically:
 buzz channels create --name <name> --type stream --visibility open
 ```
 
-**Clear when** a membership grant exists (an owner-signed event, or a `buzz channels
-add-member`-style verb). Then agents can join the channels people already use, and the
-"agent creates its own channel" step disappears from setup.
+The nearest thing that exists is `buzz-admin reconcile-channels`, which emits
+`kind:39000/39002` for channels **missing them entirely** - it backfills discovery events
+for channels created by direct SQL, and is idempotent. That is not a membership grant: a
+channel that already has its events is not "missing" them, so running it after inserting a
+`channel_members` row changes nothing. Do not mistake it for a fix.
+
+It is worth watching precisely because it is close. If those `39002` events are generated
+from `channel_members`, then a force / per-channel re-emit would make the table-write
+approach work and clear this row. That hypothesis is **untested here** - confirming it means
+mutating a live workspace, so check upstream's implementation rather than experimenting on a
+running deployment.
+
+**Clear when** a membership grant exists (an owner-signed event, a `buzz channels
+add-member`-style verb, or `reconcile-channels` gaining a force mode that re-emits `39002`
+from the table). Then agents can join the channels people already use, and the "agent
+creates its own channel" step disappears from setup.
 
 ### W3 - the relay's S3 region is not configurable
 
