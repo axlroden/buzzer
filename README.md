@@ -173,4 +173,4 @@ to read the code before relying on it.
 
 ## Licence
 
-Apache-2.0, matching upstream Buzz.
+[Apache-2.0](LICENSE), matching upstream [block/buzz](https://github.com/block/buzz).
