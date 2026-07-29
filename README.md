@@ -86,7 +86,104 @@ silently switches from subscription to per-token API billing.
    docker exec buzz-relay buzz-admin generate-key      # mint an agent identity
    docker exec buzz-relay buzz-admin add-member --pubkey <64-hex>
    ```
-3. **Give the agent a channel and a profile** (see gotchas).
+3. **Set up the agent** - see the next section; it is the fiddly part.
+
+## Setting up the agent
+
+The agent is a Buzz member like any human: it has its own keypair, its own relay
+membership, and it answers when mentioned. `buzz-acp` is the harness - it subscribes to the
+relay and drives an **ACP-speaking backend** (Claude Code here, but Goose or Codex work the
+same way). Nothing about the agent lives in the desktop app.
+
+### 1. Mint an identity for it
+
+```bash
+docker exec buzz-relay buzz-admin generate-key
+# Public key:  <64-hex>          <- becomes a relay member, and BUZZ_ACP_AGENT_OWNER's counterpart
+# Secret key:  <64-hex>          <- becomes BUZZ_PRIVATE_KEY. Not recoverable; save it now.
+docker exec buzz-relay buzz-admin add-member --pubkey <agent-64-hex>
+```
+
+Each agent needs its own keypair. Two processes sharing one key will both answer every
+mention.
+
+### 2. Get a credential for the backend
+
+For Claude Code, a subscription token (not an API key):
+
+```bash
+claude setup-token     # prints a long-lived token; store it, it is not saved for you
+```
+
+### 3. Write `agent.env` (mode 0600)
+
+```ini
+BUZZ_PRIVATE_KEY=<agent secret key from step 1>
+BUZZ_RELAY_URL=wss://buzz.example.com
+BUZZ_ACP_AGENT_COMMAND=claude-agent-acp
+BUZZ_ACP_AGENT_OWNER=<your own 64-hex pubkey>
+BUZZ_ACP_RESPOND_TO=owner-only
+CLAUDE_CODE_OAUTH_TOKEN=<token from step 2>
+```
+
+- `BUZZ_ACP_AGENT_OWNER` is **required** in the default `owner-only` mode. Without it the
+  harness logs `respond-to=owner-only but no owner is set - all events will be dropped` and
+  silently ignores everything.
+- `BUZZ_ACP_RESPOND_TO` also takes `allowlist` (with
+  `BUZZ_ACP_RESPOND_TO_ALLOWLIST=<hex>,<hex>`), `anyone`, or `nobody`.
+- Never set `ANTHROPIC_API_KEY` here: it outranks `CLAUDE_CODE_OAUTH_TOKEN` and silently
+  moves you from subscription to per-token billing.
+- Other backends: `BUZZ_ACP_AGENT_COMMAND=goose` (with `BUZZ_ACP_AGENT_ARGS=acp`) or
+  `codex-acp` plus that backend's own credential. Claude Code is spawned zero-arg.
+
+Then `nixos-rebuild switch` and check it came up:
+
+```bash
+journalctl -u buzz-acp -f
+# connected to relay at wss://...
+# agent owner: <your pubkey>
+# discovered N channel(s)
+```
+
+### 4. Give it a channel
+
+`discovered 0 channel(s)` is expected at this point and is **not** a fault: the harness only
+subscribes to channels the agent belongs to, and there is no API to add an agent to an
+existing channel. Have the agent create one - the creator is automatically a member:
+
+```bash
+# runs as the agent because it reads the same env
+sudo -u buzz env $(cat /etc/buzz/agent.env | xargs) \
+  buzz channels create --name agents --type stream --visibility open \
+  --description "headless agent"
+systemctl restart buzz-acp     # re-runs discovery
+```
+
+### 5. Give it a profile
+
+Without a `kind:0` profile the agent has no display name, so the client's member search
+cannot find it and you cannot @mention it:
+
+```bash
+sudo -u buzz env $(cat /etc/buzz/agent.env | xargs) \
+  buzz users set-profile --name Nova --about "Headless agent (always on)"
+```
+
+### 6. Talk to it
+
+In the client, open the channel the agent created, **join** it, and `@Nova` something. The
+harness batches the mention into a prompt, runs the backend, and posts the reply in-thread.
+
+### Troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| `all events will be dropped` | `BUZZ_ACP_AGENT_OWNER` unset in `owner-only` mode |
+| `discovered 0 channel(s)` | agent is in no channel - step 4 (table writes do not work) |
+| Not offered in @-autocomplete | no `kind:0` profile - step 5 |
+| Replies "authentication failed" | backend credential expired; re-run `claude setup-token` |
+| No "agent" badge | expected for self-hosted agents; see gotchas |
+| Answers twice | two processes sharing one `BUZZ_PRIVATE_KEY` |
 
 ## Auth model
 
