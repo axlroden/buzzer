@@ -63,10 +63,6 @@ before the first switch.
 | `valkey.pass`, `garage.env` | Valkey password; `GARAGE_RPC_SECRET` |
 | `credentials.json` | Cloudflare tunnel credentials |
 
-If the agent backend is Claude Code, supply `CLAUDE_CODE_OAUTH_TOKEN` (from
-`claude setup-token`) and **do not set `ANTHROPIC_API_KEY`** - it takes precedence and
-silently switches from subscription to per-token API billing.
-
 ## First-run bootstrap
 
 1. **Garage layout.** A fresh node has no layout and will refuse S3 requests until one is
