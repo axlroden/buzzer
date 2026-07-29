@@ -207,6 +207,35 @@ needing approval).
 | `BUZZ_ACP_MEMORY` | on | NIP-AE core memory injected into prompts; `BUZZ_ACP_NO_MEMORY=true` to opt out |
 | `BUZZ_ACP_NO_PRESENCE` / `_NO_TYPING` | off | Suppress presence and typing indicators |
 
+### The agent replies by shelling out
+
+Worth knowing before you trim the unit's `path`: the harness's base prompt tells the agent
+to post its reply by running `buzz messages send`. The reply is **not** taken from the
+backend's final text. So the agent needs a working shell - `SHELL` set and `bash` plus the
+`buzz` CLI on its `path` - or it will react, run a full turn, and post nothing. Claude Code
+refuses to run its Bash tool when `SHELL` is unset, and systemd units inherit no login
+environment, so `/bin/sh` existing on the host is not enough. This module sets both.
+
+### Delegating to stronger models
+
+The backend can spawn subagents (Claude Code's `Agent` tool) and set a per-subagent model,
+so the cost-effective shape is a cheap orchestrator that hands heavy work to a stronger
+model rather than one expensive model answering everything.
+
+Set `BUZZ_ACP_MODEL` to the orchestrator's model and say so in the system prompt - the
+harness only sets the session model, so subagents inherit it unless the agent is told to
+override per call:
+
+```markdown
+You run on Sonnet. Answer directly when the request is conversational or a small lookup.
+Delegate to the `Agent` tool with `model: "opus"` for multi-file changes, non-obvious
+debugging, design questions, or anything where being wrong is expensive.
+```
+
+Point `BUZZ_ACP_SYSTEM_PROMPT_FILE` at that file rather than inlining it - environment files
+handle multi-line values poorly. The file is read as the agent user, so it must be readable
+by it.
+
 ### Troubleshooting
 
 | Symptom | Cause |
@@ -215,6 +244,7 @@ needing approval).
 | `discovered 0 channel(s)` | agent is in no channel - step 4 (writing `channel_members` does not work) |
 | Not offered in @-autocomplete | no `kind:0` profile - step 5 |
 | `failed to spawn agent: No such file or directory` | `BUZZ_ACP_AGENT_COMMAND` not on the unit's `path` |
+| Reacts and goes quiet, never posts | No shell. The agent replies by running `buzz messages send`, so it needs `SHELL` set and `bash` on its `path` - see below |
 | Replies "authentication failed" | backend credential expired; re-run `claude setup-token` |
 | No "agent" badge | expected for self-hosted agents; see gotchas |
 | Answers twice | two processes sharing one `BUZZ_PRIVATE_KEY` |

@@ -217,7 +217,18 @@ in
       wantedBy = [ "multi-user.target" ];
       after = [ "network-online.target" "docker-buzz-relay.service" ];
       wants = [ "network-online.target" ];
-      path = [ pkgs.claude-agent-acp pkgs.claude-code pkgs.git pkgs.nodejs_22 ];
+      # bashInteractive is NOT optional: the harness's base prompt tells the agent to reply
+      # by shelling out to `buzz messages send`, so a missing shell means it can never
+      # answer - it reacts, runs its turn, and posts nothing. `buzz` itself comes from
+      # buzz-agent-tools below.
+      path = [
+        pkgs.claude-agent-acp
+        pkgs.claude-code
+        pkgs.bashInteractive
+        buzz-agent-tools
+        pkgs.git
+        pkgs.nodejs_22
+      ];
       serviceConfig = {
         ExecStart = "${buzz-agent-tools}/bin/buzz-acp";
         EnvironmentFile = cfg.agent.environmentFile;
@@ -227,7 +238,13 @@ in
         RestartSec = 15;
         StateDirectory = "buzz-agent";
         WorkingDirectory = "/var/lib/buzz-agent";
-        Environment = [ "HOME=/var/lib/buzz-agent" ];
+        # SHELL must be set explicitly. Claude Code refuses to run its Bash tool without it
+        # ("No suitable shell found"), and systemd units inherit no login environment, so
+        # /bin/sh existing on the host is not enough.
+        Environment = [
+          "HOME=/var/lib/buzz-agent"
+          "SHELL=${pkgs.bashInteractive}/bin/bash"
+        ];
         # Hardening. The agent executes tool calls on behalf of chat messages, so it is
         # treated as semi-untrusted: no capabilities, no container sockets (which would be
         # a trivial root escape), no device access, and only the sockets it needs.
