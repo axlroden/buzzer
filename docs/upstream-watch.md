@@ -20,6 +20,7 @@ this file is that nobody has to rediscover *why* a line of config is there.
 |---|---|---|---|
 | W1 | Agent publishes `kind:0` only, so it is mentionable but unbadged | [#2987](https://github.com/block/buzz/issues/2987), [#3277](https://github.com/block/buzz/issues/3277) | `shouldHideAgentFromMentions` reaches its invocability branch |
 | W2 | Agent must create its own channel; it cannot be added to an existing one | not filed (see `reconcile-channels`) | Relay or CLI gains a membership grant for an existing pubkey |
+| W7 | Repos must be created in the desktop client; `buzz repos create` produces unusable announcements | not filed | `buzz repos create` gains a channel-binding flag |
 | W5 | Relay runs from the upstream container image, not built from source | not filed | Upstream publishes the frontend assets, or a source build produces the web surface |
 | W6 | Postgres needs `enableTCPIP` + a loopback `trust` rule | gated on W5 | The relay no longer runs in a container |
 
@@ -106,6 +107,40 @@ use.
 while Garage validated the signature scope. SeaweedFS does not, so the pin is unnecessary
 and the `region` option is gone. If the object store is ever changed again, re-check this
 first - it fails as `AuthorizationHeaderMalformed`, which does not obviously point at region.
+
+### W7 - CLI-announced repos cannot pass the git read gate
+
+The relay gates git reads on a **buzz-channel binding** carried by the `kind:30617`
+announcement. Without it every fetch is denied:
+
+```
+WARN git read gate: missing/malformed buzz-channel binding (deny)  repo=constellation
+```
+
+The client surfaces that as *"Could not fetch repository … repository not found"*, which is
+misleading - the repo name is registered and auth succeeded (the relay logs 200s, no 401s).
+The denial is the binding check, not a missing repo or a credential problem.
+
+`buzz repos create` has no flag for it: its options are `--id`, `--name`, `--description`,
+`--clone`, `--web`, `--nostr-relay`. So **any announcement made from the CLI is
+structurally unusable**, and there is no CLI path to repair or retract it either -
+`buzz messages delete` resolves message-kind events only and answers `event <id> not found`
+for a 30617.
+
+Practical consequence: **create projects in the desktop client**, which binds them to a
+channel and pushes over NIP-98. Do not announce repos from the CLI expecting them to work.
+Two related facts worth knowing:
+
+- Announcing reserves the name in `git_repo_names` but does not create the repo; a repo
+  comes into being on first push. There is no create/init endpoint - the only git routes are
+  `info/refs`, `git-upload-pack` and `git-receive-pack`.
+- Pushing cannot be scripted with plain git: the endpoint advertises
+  `WWW-Authenticate: Nostr realm="buzz"` with no Basic fallback, and NIP-98 signs each
+  request's method and URL, so a static header cannot cover a whole push. No credential
+  helper ships with the CLI.
+
+**Clear when** `buzz repos create` can bind an announcement to a channel - then repos can be
+provisioned from a script rather than by hand in the client.
 
 ### W5 / W6 - the relay is an image, the agent is built
 
