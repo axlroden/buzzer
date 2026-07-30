@@ -1,8 +1,15 @@
 # buzzer
 
-A NixOS module that runs a self-hosted [Buzz](https://github.com/block/buzz) workspace on a
-single host: the relay, its data services, and (optionally) a **headless agent** that stays
-online when no desktop client is running.
+Two NixOS modules for self-hosting [Buzz](https://github.com/block/buzz):
+
+| Module | What it gives you |
+|---|---|
+| `nixosModules.buzz-agent` | **just a headless agent**, pointed at any relay you are a member of |
+| `nixosModules.buzzer` | a whole workspace on one host - relay, data services, ingress, backups - and the agent alongside it |
+
+They are deliberately separable. If you only want an agent that stays online, you do not need
+to run a relay, a database or an object store: use `buzz-agent` on its own. `buzzer` imports
+it for the co-hosted case.
 
 Buzz ships a desktop app whose agents run as child processes of that app - close the laptop
 and they stop. This module runs the same ACP harness as a system service instead, so an
@@ -24,6 +31,27 @@ Only the ingress is reachable from outside the host; every data service binds to
 `127.0.0.1`.
 
 ## Usage
+
+### Just the agent
+
+Nothing else is required - no relay, no Postgres, no object store:
+
+```nix
+{
+  imports = [ inputs.buzzer.nixosModules.buzz-agent ];
+
+  services.buzz-agent = {
+    enable = true;
+    relayUrl = "wss://buzz.example.com";        # someone else's relay is fine
+    environmentFile = "/etc/buzz/agent.env";    # identity + backend credential
+  };
+}
+```
+
+Swap the backend with `backendPackages` (defaults to Claude Code's ACP adapter), and give the
+agent extra tools with `extraPackages`.
+
+### The whole workspace
 
 ```nix
 {

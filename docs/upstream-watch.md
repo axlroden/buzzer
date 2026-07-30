@@ -166,6 +166,14 @@ Not blocking anything, but each would let this module get simpler:
   client's member search, which reads as "the agent is broken" rather than "the agent has no
   name". Setting a profile could be part of registering an agent identity.
 
+## Module layout
+
+`buzz-agent` is a standalone module, not a sub-option of `buzzer`. The agent is the piece most
+people want and the piece with the widest blast radius - it executes tool calls on behalf of
+chat messages with permission prompts disabled - so it is deployable, and reasonable about,
+on its own. `buzzer` imports it and forwards `environmentFile`/`user` for the co-hosted case;
+anything finer is set directly on `services.buzz-agent`.
+
 ## Deployment notes
 
 Not upstream's problem, and they will not clear - but they cost real time to diagnose.

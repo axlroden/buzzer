@@ -10,6 +10,10 @@ let
   buzz-agent-tools = pkgs.callPackage ../pkgs/buzz-agent-tools.nix { };
 in
 {
+  # The agent is a separate module so it can be deployed on its own, against a relay this
+  # host does not run. Enabling it here is a convenience for the co-hosted case.
+  imports = [ ./agent.nix ];
+
   options.services.buzzer = {
     enable = lib.mkEnableOption "a self-hosted Buzz workspace";
 
@@ -93,22 +97,19 @@ in
 
     agent = {
       enable = lib.mkEnableOption ''
-        the headless agent (buzz-acp driving an ACP-speaking coding agent), so it keeps
-        answering when no desktop client is running
+        the headless agent on this host, pointed at this workspace's own relay. It is the
+        same module as `services.buzz-agent`, which can equally be deployed alone against a
+        relay elsewhere - configure it directly for anything beyond the options forwarded here
       '';
       environmentFile = lib.mkOption {
         type = lib.types.path;
         example = "/etc/buzz/agent.env";
-        description = ''
-          Agent environment, kept out of the Nix store: BUZZ_PRIVATE_KEY (its own identity),
-          BUZZ_RELAY_URL, BUZZ_ACP_AGENT_OWNER, BUZZ_ACP_AGENT_COMMAND and whatever
-          credential the chosen agent backend needs.
-        '';
+        description = "Passed through to `services.buzz-agent.environmentFile`.";
       };
       user = lib.mkOption {
         type = lib.types.str;
         default = "buzz";
-        description = "Unprivileged user the agent runs as.";
+        description = "Passed through to `services.buzz-agent.user`.";
       };
     };
 
@@ -242,72 +243,13 @@ in
     };
 
     # ------------------------------------------------------------------ agent
-    users.users.${cfg.agent.user} = lib.mkIf cfg.agent.enable {
-      isSystemUser = true;
-      group = cfg.agent.user;
-      home = "/var/lib/buzz-agent";
-      createHome = true;
-    };
-    users.groups.${cfg.agent.user} = lib.mkIf cfg.agent.enable { };
-
-    systemd.services.buzz-acp = lib.mkIf cfg.agent.enable {
-      description = "Buzz ACP harness (headless agent)";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "network-online.target" "docker-buzz-relay.service" ];
-      wants = [ "network-online.target" ];
-      # bashInteractive is NOT optional: the harness's base prompt tells the agent to reply
-      # by shelling out to `buzz messages send`, so a missing shell means it can never
-      # answer - it reacts, runs its turn, and posts nothing. `buzz` itself comes from
-      # buzz-agent-tools below.
-      path = [
-        pkgs.claude-agent-acp
-        pkgs.claude-code
-        pkgs.bashInteractive
-        buzz-agent-tools
-        pkgs.git
-        pkgs.nodejs_22
-      ];
-      serviceConfig = {
-        ExecStart = "${buzz-agent-tools}/bin/buzz-acp";
-        EnvironmentFile = cfg.agent.environmentFile;
-        User = cfg.agent.user;
-        Group = cfg.agent.user;
-        Restart = "always";
-        RestartSec = 15;
-        StateDirectory = "buzz-agent";
-        WorkingDirectory = "/var/lib/buzz-agent";
-        # SHELL must be set explicitly. Claude Code refuses to run its Bash tool without it
-        # ("No suitable shell found"), and systemd units inherit no login environment, so
-        # /bin/sh existing on the host is not enough.
-        Environment = [
-          "HOME=/var/lib/buzz-agent"
-          "SHELL=${pkgs.bashInteractive}/bin/bash"
-        ];
-        # Hardening. The agent executes tool calls on behalf of chat messages, so it is
-        # treated as semi-untrusted: no capabilities, no container sockets (which would be
-        # a trivial root escape), no device access, and only the sockets it needs.
-        NoNewPrivileges = true;
-        CapabilityBoundingSet = "";
-        AmbientCapabilities = "";
-        RestrictAddressFamilies = [ "AF_UNIX" "AF_INET" "AF_INET6" ];
-        SystemCallArchitectures = "native";
-        InaccessiblePaths = [ "-/run/docker.sock" "-/run/podman/podman.sock" ];
-        ProtectSystem = "strict";
-        ProtectHome = "tmpfs";
-        ReadWritePaths = [ "/var/lib/buzz-agent" ];
-        PrivateTmp = true;
-        PrivateDevices = true;
-        ProtectClock = true;
-        ProtectControlGroups = true;
-        ProtectHostname = true;
-        ProtectKernelLogs = true;
-        ProtectKernelModules = true;
-        ProtectKernelTunables = true;
-        RestrictNamespaces = true;
-        RestrictRealtime = true;
-        RestrictSUIDSGID = true;
-        LockPersonality = true;
-      };
+    # Delegated to the standalone module. Ordered after the relay container so a co-hosted
+    # agent does not spend its first seconds retrying a relay that is still starting.
+    services.buzz-agent = lib.mkIf cfg.agent.enable {
+      enable = true;
+      environmentFile = cfg.agent.environmentFile;
+      user = cfg.agent.user;
+      after = [ "docker-buzz-relay.service" ];
     };
 
     # ------------------------------------------------------------------ backups
@@ -336,8 +278,5 @@ in
 
     environment.systemPackages = [ buzz-agent-tools pkgs.seaweedfs pkgs.postgresql_17 ];
 
-    # claude-code and the ACP adapter are unfree.
-    nixpkgs.config.allowUnfreePredicate = pkg:
-      builtins.elem (lib.getName pkg) [ "claude-code" "claude-agent-acp" ];
   };
 }

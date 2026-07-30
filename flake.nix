@@ -8,8 +8,12 @@
   };
 
   outputs = { self, nixpkgs, disko }: {
-    # The reusable piece: import this into any NixOS host.
+    # Two reusable pieces, deliberately separable:
+    #   buzzer     - the whole workspace: relay, data services, ingress, backups
+    #   buzz-agent - just the headless agent, usable against ANY relay you are a member of
+    # `buzzer` imports `buzz-agent` for the co-hosted case, so importing both is harmless.
     nixosModules.buzzer = ./modules/buzzer.nix;
+    nixosModules.buzz-agent = ./modules/agent.nix;
     nixosModules.default = self.nixosModules.buzzer;
 
     # A complete example host, also used to type-check the module in CI.
