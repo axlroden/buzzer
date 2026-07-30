@@ -131,10 +131,12 @@ instead of only from the desktop client. The two related facts below still hold:
 - Announcing reserves the name in `git_repo_names` but does not create the repo; a repo
   comes into being on first push. There is no create/init endpoint - the only git routes are
   `info/refs`, `git-upload-pack` and `git-receive-pack`.
-- Pushing cannot be scripted with plain git: the endpoint advertises
-  `WWW-Authenticate: Nostr realm="buzz"` with no Basic fallback, and NIP-98 signs each
-  request's method and URL, so a static header cannot cover a whole push. No credential
-  helper ships with the CLI.
+- Pushing **can** be scripted, contrary to an earlier note here: upstream ships a
+  `git-credential-nostr` crate ("Git credential helper that produces NIP-98 auth headers for
+  Buzz's git server"). It is simply not one of the binaries this flake used to build - now
+  added to `cargoBuildFlags`. Recipe in the README under *Pushing to a Buzz-hosted repo*.
+  The earlier claim came from checking the `buzz` CLI's subcommands and the shipped binaries,
+  and not the upstream workspace's crate list.
 
 ### W5 / W6 - the relay is an image, the agent is built
 

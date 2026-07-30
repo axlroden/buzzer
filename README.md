@@ -16,7 +16,7 @@ agent is a permanent member of the workspace rather than a feature of one machin
 | Redis | native NixOS service, loopback only |
 | SeaweedFS (S3) | systemd unit shipped by this flake, loopback only |
 | Buzz relay | upstream container image, host networking |
-| `buzz-acp` + `buzz` CLI | **built from source** by this flake |
+| `buzz-acp`, `buzz` CLI, `git-credential-nostr` | **built from source** by this flake |
 | Ingress | optional Cloudflare tunnel |
 | Backups | optional nightly `pg_dump`, auto-pruned |
 
@@ -265,6 +265,33 @@ Every workaround this module carries - and what has to happen upstream before it
 deleted - is in **[docs/upstream-watch.md](docs/upstream-watch.md)**, along with the
 deployment traps that cost the most time to diagnose. Read it before changing the object
 store, the domain, or the agent's identity events.
+
+## Pushing to a Buzz-hosted repo
+
+Repos live on the relay at `https://<domain>/git/<owner-pubkey>/<repo>`, and the endpoint
+authenticates with NIP-98 (`WWW-Authenticate: Nostr realm="buzz"`) - no Basic fallback, and
+a static header cannot cover a push because each request's method and URL are signed. Use
+the `git-credential-nostr` helper this flake builds:
+
+```bash
+export NOSTR_PRIVATE_KEY=nsec1...
+git -c credential.useHttpPath=true \
+    -c credential.helper=$(command -v git-credential-nostr) \
+    push https://<domain>/git/<owner-pubkey>/<repo> HEAD:refs/heads/main
+```
+
+`credential.useHttpPath=true` is required - the helper signs per path. Existing repos push
+with full history this way, so an established project does not have to be recreated in the
+client.
+
+Two things to know first:
+
+- **The repo must be announced and bound to a channel**, or every request 404s. The
+  `buzz-channel` tag is the git ACL: `buzz repos create --id <repo> --channel <uuid>`, or
+  `buzz repos bind` for one announced earlier.
+- `fatal: failed to store: -1` on success is harmless - the helper implements `get` but not
+  `store`, so git's attempt to cache the credential fails after the push has already
+  completed.
 
 ## Updating the pins
 

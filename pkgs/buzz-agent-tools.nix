@@ -27,7 +27,7 @@ rustPlatform.buildRustPackage rec {
   buildInputs = [ openssl ];
 
   # Only the two agent-side crates; the relay/desktop members are not needed here.
-  cargoBuildFlags = [ "-p" "buzz-acp" "-p" "buzz-cli" ];
+  cargoBuildFlags = [ "-p" "buzz-acp" "-p" "buzz-cli" "-p" "git-credential-nostr" ];
   doCheck = false;
 
   meta = with lib; {
