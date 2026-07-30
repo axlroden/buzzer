@@ -19,7 +19,6 @@ this file is that nobody has to rediscover *why* a line of config is there.
 | ID | Workaround | Watch | Clear when |
 |---|---|---|---|
 | W1 | Agent publishes `kind:0` only, so it is mentionable but unbadged | [#2987](https://github.com/block/buzz/issues/2987), [#3277](https://github.com/block/buzz/issues/3277) | `shouldHideAgentFromMentions` reaches its invocability branch |
-| W2 | Agent must create its own channel; it cannot be added to an existing one | not filed (see `reconcile-channels`) | Relay or CLI gains a membership grant for an existing pubkey |
 | W5 | Relay runs from the upstream container image, not built from source | not filed | Upstream publishes the frontend assets, or a source build produces the web surface |
 | W6 | Postgres needs `enableTCPIP` + a loopback `trust` rule | gated on W5 | The relay no longer runs in a container |
 
@@ -46,36 +45,31 @@ Two things that look like solutions and are not:
 badged *and* mentionable. Verify in a client that @-autocomplete still offers it - that
 regression is exactly what the issue is about.
 
-### W2 - no way to add an agent to an existing channel
+### W2 - withdrawn 2026-07-30, it was never true
 
-The relay serves channel membership from *events* (`kind:39002`), not from the
-`channel_members` table, so writing that table directly has no effect - the harness keeps
-reporting `discovered 0 channel(s)`. There is no API, CLI verb, or client affordance to
-grant an existing pubkey membership of an existing channel.
-
-The workaround is to have the agent create its own channel, since the creator is a member
-automatically:
+**This row was wrong.** It claimed there was "no API, CLI verb, or client affordance" to
+grant an existing pubkey membership of an existing channel. There is, and there always was:
 
 ```bash
-buzz channels create --name <name> --type stream --visibility open
+buzz channels add-member --channel <uuid> --pubkey <64-hex> [--role member|bot|admin|guest]
+buzz channels join --channel <uuid>
 ```
 
-The nearest thing that exists is `buzz-admin reconcile-channels`, which emits
-`kind:39000/39002` for channels **missing them entirely** - it backfills discovery events
-for channels created by direct SQL, and is idempotent. That is not a membership grant: a
-channel that already has its events is not "missing" them, so running it after inserting a
-`channel_members` row changes nothing. Do not mistake it for a fix.
+Verified against the build predating this row, so the verb was present the whole time.
 
-It is worth watching precisely because it is close. If those `39002` events are generated
-from `channel_members`, then a force / per-channel re-emit would make the table-write
-approach work and clear this row. That hypothesis is **untested here** - confirming it means
-mutating a live workspace, so check upstream's implementation rather than experimenting on a
-running deployment.
+How the mistake happened, because the shape of it is worth avoiding: the symptom was real -
+writing the `channel_members` table directly had no effect, since the relay serves
+membership from `kind:39002` events. From that true observation the row concluded no
+mechanism existed, without ever running `buzz channels --help`. A failed *workaround* was
+generalised into a claim about the *whole interface*.
 
-**Clear when** a membership grant exists (an owner-signed event, a `buzz channels
-add-member`-style verb, or `reconcile-channels` gaining a force mode that re-emits `39002`
-from the table). Then agents can join the channels people already use, and the "agent
-creates its own channel" step disappears from setup.
+The lesson for anything added here: before recording that something is impossible, check the
+tool's own help output. "I could not find a way" and "there is no way" are different claims,
+and only the second belongs in this table.
+
+The genuinely useful residue: `buzz-admin reconcile-channels` backfills `kind:39000/39002`
+for channels *missing them entirely* (direct-SQL/seed cases) and is idempotent. It is not a
+membership grant - use `add-member` for that.
 
 ### W3 / W4 - resolved 2026-07-29 by moving off Garage
 
@@ -161,8 +155,7 @@ Until then the pins are bumped by hand - recipe in the README under *Updating th
 
 ## Worth filing upstream
 
-Not blocking anything, but each would let this module get simpler. W2 above is the
-strongest candidate; also:
+Not blocking anything, but each would let this module get simpler:
 
 - **Community rename / rehost.** Communities are keyed to the hostname, so changing
   `domain` after first run makes the relay create a second, empty community instead of
