@@ -143,9 +143,5 @@ in
         LockPersonality = true;
       };
     };
-
-    # claude-code and the ACP adapter are unfree.
-    nixpkgs.config.allowUnfreePredicate = lib.mkDefault (pkg:
-      builtins.elem (lib.getName pkg) [ "claude-code" "claude-agent-acp" ]);
   };
 }

@@ -79,6 +79,24 @@ agent extra tools with `extraPackages`.
 A complete host is in [`example/`](example/), which is also what `nix flake check`
 type-checks the module against.
 
+## Tests
+
+```bash
+nix flake check                          # both VM tests (Linux; needs KVM to be quick)
+nix build .#checks.x86_64-linux.workspace -L
+```
+
+Regression tests for failures this module has actually had, not smoke tests:
+
+| Test | Guards |
+|---|---|
+| `agent-only` | the agent runs with **no** relay/database/object store; `SHELL` is set and a shell plus the `buzz` CLI are on its PATH (without them it reacts, runs a full turn and posts nothing); the systemd sandbox is applied |
+| `workspace` | SeaweedFS binds S3/volume/filer/master and **not** 8080 (which the relay takes); nothing listens beyond loopback; Postgres accepts the owning role over TCP; Redis demands its password; **S3 enforces conditional writes** - a second `If-None-Match: *` gets 412 and the first writer's bytes survive |
+
+The conditional-write case is the one that matters most: it is the property Buzz's git object
+store depends on, the reason Garage was unusable, and it fails silently at the storage layer
+rather than loudly at the relay.
+
 ## Secrets
 
 Referenced by path so they stay out of the world-readable Nix store. Create them `0600`

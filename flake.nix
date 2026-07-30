@@ -29,5 +29,18 @@
 
     packages.x86_64-linux.buzz-agent-tools =
       nixpkgs.legacyPackages.x86_64-linux.callPackage ./pkgs/buzz-agent-tools.nix { };
+
+    # NixOS VM tests. Run with: nix flake check  (or `nix build .#checks.x86_64-linux.<name>`)
+    # These are regression tests for failures this module has actually had, not smoke tests.
+    checks.x86_64-linux = {
+      workspace = import ./tests/workspace.nix {
+        pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        inherit self;
+      };
+      agent-only = import ./tests/agent-only.nix {
+        pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        inherit self;
+      };
+    };
   };
 }

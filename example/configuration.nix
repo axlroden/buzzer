@@ -1,7 +1,11 @@
 # Example host. Copy this, fill in your own values, and keep it OUT of version control
 # if it contains anything you would not publish.
-{ ... }:
+{ lib, ... }:
 {
+  # Claude Code and its ACP adapter are unfree; the agent module leaves this to consumers.
+  nixpkgs.config.allowUnfreePredicate = pkg:
+    builtins.elem (lib.getName pkg) [ "claude-code" "claude-agent-acp" ];
+
   imports = [ ../modules/buzzer.nix ];
 
   services.buzzer = {
