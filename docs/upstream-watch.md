@@ -18,7 +18,7 @@ this file is that nobody has to rediscover *why* a line of config is there.
 
 | ID | Workaround | Watch | Clear when |
 |---|---|---|---|
-| W1 | Agent publishes `kind:0` only, so it is mentionable but unbadged | [#2987](https://github.com/block/buzz/issues/2987), [#3277](https://github.com/block/buzz/issues/3277) | `shouldHideAgentFromMentions` reaches its invocability branch |
+| W1 | Agent publishes `kind:0` only, so it is mentionable but unbadged | [#2987](https://github.com/block/buzz/issues/2987), [#3277](https://github.com/block/buzz/issues/3277), [#5484](https://github.com/block/buzz/pull/5484), [#5483](https://github.com/block/buzz/pull/5483) | For our `owner-only` config specifically: #5484 merges (adds owner comparison to `relayAgentIsSharedWithUser`) and #5483 merges (directory reads `kind:10100` in addition to `kind:30177`) |
 | W5 | Relay runs from the upstream container image, not built from source | not filed | Upstream publishes the frontend assets, or a source build produces the web surface |
 | W6 | Postgres needs `enableTCPIP` + a loopback `trust` rule | gated on W5 | The relay no longer runs in a container |
 
@@ -32,6 +32,23 @@ unreachable ([#2987](https://github.com/block/buzz/issues/2987), open).
 
 So a headless agent publishes `kind:0` only. It appears as an ordinary member: unbadged,
 but mentionable and fully functional. That is what this module assumes.
+
+**#2987 landing is not sufficient for our config.** A 2026-08-13 comment on that issue
+traced `relayAgentIsSharedWithUser` (`desktop/src/features/agents/lib/agentAutocompleteEligibility.ts`)
+and found it has exactly two paths that return true: `allowlist` with a matching pubkey, or
+`anyone` with a shared channel. `respond_to: "owner-only"` - what `agent.env` sets here -
+falls through to `false` unconditionally, for every viewer including the owner, because
+neither `RelayAgentInfo` nor `RelayAgent` carries an owner field to compare against. Fixing
+the invocability branch (#2987's stated Clear when) does not touch this: `owner-only` would
+still never be offered in @-mention autocomplete.
+
+[#5484](https://github.com/block/buzz/pull/5484) is the actual fix - it sources verified
+NIP-OA ownership from `kind:0` profiles so `owner-only` has an owner to compare against.
+[#5483](https://github.com/block/buzz/pull/5483) matters too: it reads the union of
+`kind:10100` and `kind:30177` for the directory, which is the other half of "publishing
+kind:10100 helps a headless seat" - without it, publishing 10100 populates a directory
+Desktop's own mention picker still doesn't consult for external agents. Both are open, not
+yet merged, as of this writing.
 
 Two things that look like solutions and are not:
 
