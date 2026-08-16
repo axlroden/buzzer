@@ -21,6 +21,8 @@ this file is that nobody has to rediscover *why* a line of config is there.
 | W1 | Agent publishes `kind:0` only, so it is mentionable but unbadged | [#2987](https://github.com/block/buzz/issues/2987), [#3277](https://github.com/block/buzz/issues/3277), [#5484](https://github.com/block/buzz/pull/5484), [#5483](https://github.com/block/buzz/pull/5483) | For our `owner-only` config specifically: #5484 merges (adds owner comparison to `relayAgentIsSharedWithUser`) and #5483 merges (directory reads `kind:10100` in addition to `kind:30177`) |
 | W5 | Relay runs from the upstream container image, not built from source | not filed | Upstream publishes the frontend assets, or a source build produces the web surface |
 | W6 | Postgres needs `enableTCPIP` + a loopback `trust` rule | gated on W5 | The relay no longer runs in a container |
+| W8 | Since desktop v0.5.12, the agent lost @-mentionability: the send-boundary gate requires `kind:10100` `channel_ids`/`respond_to` fields that nothing in this stack publishes | [#5681](https://github.com/block/buzz/pull/5681) (merged, the regression), [#5869](https://github.com/block/buzz/issues/5869), [#5878](https://github.com/block/buzz/pull/5878), [#5928](https://github.com/block/buzz/issues/5928) | #5878 or #5928 merges (either publishes our agent's `kind:10100` directory record) and we adopt it, or the gate ships a membership-based fallback |
+| W9 | `buzz-acp`'s MCP shell config puts `BUZZ_PRIVATE_KEY`/`BUZZ_AUTH_TAG` in reach of model-controlled shell commands - this deployment gives the agent unit a shell (see README, "The agent replies by shelling out") | [#2883](https://github.com/block/buzz/issues/2883), [#5288](https://github.com/block/buzz/pull/5288) | #5288 merges (isolates the signing key behind a session capability, adds a typed `buzz_send_message` tool) - would also let us drop the shell workaround entirely |
 
 ### W1 - badged or mentionable, not both
 
@@ -61,6 +63,27 @@ Two things that look like solutions and are not:
 **Clear when** #2987 lands: publish `kind:10100` alongside `kind:0` and the agent should be
 badged *and* mentionable. Verify in a client that @-autocomplete still offers it - that
 regression is exactly what the issue is about.
+
+**Owner-only has a second blocker specific to our shape.** [#4223](https://github.com/block/buzz/issues/4223)
+(open) reports that on a *closed* relay (`require_relay_membership = true`, our config) the
+NIP-OA owner attestation is silently dropped for an agent that is a *direct* relay member
+(also our config) - `users.agent_owner_pubkey` never gets populated, only the inverse
+(open relay, or membership granted via the owner) works. So even after #5484 merges,
+`owner-only` would still not resolve an owner for us specifically. A 2026-08-15 comment on
+that issue adds that the same code path 403s NIP-AM turn-metric events
+(`kind:44200`, added by #4950, merged 2026-08-12) for every agent in this shape - something
+to watch for before bumping `buzz-agent-tools` past that rev.
+
+[#5581](https://github.com/block/buzz/pull/5581) is the fix in progress: it hoists owner
+resolution out of the `require_relay_membership` conditional at both materialization sites
+(HTTP submit and NIP-42 AUTH), so a direct member's self-presented NIP-OA tag is trusted the
+same way a delegated one already is. A 2026-08-15 comment confirms a live repro against a
+real relay clears both the turn-metric 403 and the rate-class throttling - with one condition
+to check against our config once it merges: the reviewed version also requires the *owner*
+key, not just the agent, to be a relay member on a closed relay (otherwise a direct member
+could self-attest a throwaway owner). Our owner is already added as a member (bootstrap step
+2 adds "yourself and any agent"), so this should not bite us, but worth confirming after
+`buzz-agent-tools` picks up a rev built from this fix. Open, not merged, as of this writing.
 
 ### W2 - withdrawn 2026-07-30, it was never true
 
@@ -154,6 +177,64 @@ instead of only from the desktop client. The two related facts below still hold:
   added to `cargoBuildFlags`. Recipe in the README under *Pushing to a Buzz-hosted repo*.
   The earlier claim came from checking the `buzz` CLI's subcommands and the shipped binaries,
   and not the upstream workspace's crate list.
+
+### W8 - a fail-closed mention gate with no publisher for the fields it requires
+
+[#5681](https://github.com/block/buzz/pull/5681) (merged 2026-08-13, shipped in desktop
+v0.5.12 onward) changed the @-mention send-boundary gate: a non-managed agent is admitted
+only when its `kind:10100` directory record's *content* carries `channel_ids` including the
+current channel and `respond_to` of `anyone`/`allowlist`. Channel membership alone no longer
+counts - the gate went fail-open to fail-closed.
+
+The problem, per [#5869](https://github.com/block/buzz/issues/5869): no publisher of those
+fields exists anywhere in the upstream repo. The only thing that emits `kind:10100` is
+`buzz channels set-add-policy`, whose content is just `{"channel_add_policy": "<policy>"}` -
+no `channel_ids`, no `respond_to`. Since `kind:10100` is replaceable, even that publish
+clobbers any richer record. Net effect: any headless/relay-hosted agent, including ours, is
+structurally un-mentionable on desktop v0.5.12+ regardless of the W1 badge tradeoff.
+
+[#5878](https://github.com/block/buzz/pull/5878) (open) adds `buzz agents set-directory`, a
+CLI publisher that read-merges the existing `kind:10100` record (preserving
+`channel_add_policy`) and derives `channel_ids` from the agent's own `kind:39002`
+memberships. Its author reports 24 production relay-hosted agents already republished with
+it and confirmed admitted by the new gate. Not merged as of this writing, so not yet
+something we can pin to.
+
+[#5928](https://github.com/block/buzz/issues/5928) proposes a different shape of fix: rather
+than a one-off CLI publish, have `buzz-acp` itself reconcile a complete `kind:10100` profile
+at startup after channel discovery - preserving unknown fields, publishing real channel ids
+and the effective response policy, and folding in the implicit owner for
+`owner-only`/`allowlist` (Desktop evaluates the directory allowlist literally, so ours needs
+the owner listed explicitly even though `buzz-acp` admits it implicitly at runtime). If this
+lands instead of or alongside #5878, it removes the operational step of re-running the
+publisher after every channel join. Filed 2026-08-15 with a reproduction against desktop
+v0.5.14; no PR yet.
+
+**Clear when** #5878 or #5928 merges and we adopt it to publish our agent's directory record,
+or the gate ships a membership-based fallback.
+
+### W9 - the agent's shell can read its own signing key
+
+This deployment gives the `buzz-agent` systemd unit a shell because the ACP harness's base
+prompt has the agent reply by shelling out to `buzz messages send` rather than taking the
+reply from the backend's final text (see README, "The agent replies by shelling out").
+
+[#2883](https://github.com/block/buzz/issues/2883) (open) reports that `buzz-acp` puts
+`BUZZ_PRIVATE_KEY` in the MCP shell tool's environment, and `BUZZ_AUTH_TAG` goes with it. Any
+command the agent runs - including ones the model, not an adversary, chooses to run - can
+read the raw signing key. A 2026-08-15 comment on the issue is a real (not hypothetical)
+repro: an agent asked a benign question ran `env | grep`, printed the key, and it was
+rendered verbatim into the channel transcript, visible to every member. Provider API keys
+are *not* exported into the same shell - only the Buzz signing material is.
+
+[#5288](https://github.com/block/buzz/pull/5288) (open) is the fix in progress: keep the
+signing key inside `buzz-acp`, give the shell no publishing capability, and add a typed
+`buzz_send_message` MCP tool instead. If it lands as described, it would also let us retire
+the shell/`bashInteractive` workaround from W9's cause entirely - the agent would no longer
+need to shell out to reply.
+
+**Clear when** #5288 (or an equivalent fix) merges. Until then, `BUZZ_PRIVATE_KEY` should be
+treated as readable by anything the agent's model decides to run.
 
 ### W5 / W6 - the relay is an image, the agent is built
 
