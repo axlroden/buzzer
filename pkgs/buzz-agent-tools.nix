@@ -7,13 +7,13 @@
 
 rustPlatform.buildRustPackage rec {
   pname = "buzz-agent-tools";
-  version = "0-unstable-2026-08-04";
+  version = "0-unstable-2026-08-18";
 
   src = fetchFromGitHub {
     owner = "block";
     repo = "buzz";
-    rev = "631b05c883f58e9533e9038b4669ebdfb1d9cf27";
-    hash = "sha256-20FhGBXe7koihZB9ClbhBApVXuQH7sISL0uTWsi0WWI=";
+    rev = "cc8a8b0dcbf5c01311b2ac7e1827ff3e582299f3";
+    hash = "sha256-2S0Z/Gb++hfj9tcWIzkrIGMhzQ9UtpgR01EJRyCgl2Y=";
   };
 
   # The workspace lock file pulls ~40 git dependencies; allowBuiltinFetchGit avoids
