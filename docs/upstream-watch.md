@@ -18,7 +18,7 @@ this file is that nobody has to rediscover *why* a line of config is there.
 
 | ID | Workaround | Watch | Clear when |
 |---|---|---|---|
-| W1 | Agent publishes `kind:0` only, so it is mentionable but unbadged | [#2987](https://github.com/block/buzz/issues/2987), [#3277](https://github.com/block/buzz/issues/3277), [#5484](https://github.com/block/buzz/pull/5484), [#5483](https://github.com/block/buzz/pull/5483) | For our `owner-only` config specifically: #5484 merges (adds owner comparison to `relayAgentIsSharedWithUser`) and #5483 merges (directory reads `kind:10100` in addition to `kind:30177`) |
+| W1 | Agent publishes `kind:0` only, so it is mentionable but unbadged | [#2987](https://github.com/block/buzz/issues/2987), [#3277](https://github.com/block/buzz/issues/3277), [#4223](https://github.com/block/buzz/issues/4223), [#5581](https://github.com/block/buzz/pull/5581) | For our `owner-only` config specifically: the client-side owner comparison already landed (verified on `main`), so only #5581 (or an equivalent fix for #4223) merging - so a direct member's NIP-OA owner attestation actually resolves on our closed relay - is left |
 | W5 | Relay runs from the upstream container image, not built from source | not filed | Upstream publishes the frontend assets, or a source build produces the web surface |
 | W6 | Postgres needs `enableTCPIP` + a loopback `trust` rule | gated on W5 | The relay no longer runs in a container |
 | W8 | Since desktop v0.5.12, the agent lost @-mentionability: the send-boundary gate requires `kind:10100` `channel_ids`/`respond_to` fields that nothing in this stack publishes | [#5681](https://github.com/block/buzz/pull/5681) (merged, the regression), [#5869](https://github.com/block/buzz/issues/5869), [#5878](https://github.com/block/buzz/pull/5878), [#5928](https://github.com/block/buzz/issues/5928) | #5878 or #5928 merges (either publishes our agent's `kind:10100` directory record) and we adopt it, or the gate ships a membership-based fallback |
@@ -44,13 +44,20 @@ neither `RelayAgentInfo` nor `RelayAgent` carries an owner field to compare agai
 the invocability branch (#2987's stated Clear when) does not touch this: `owner-only` would
 still never be offered in @-mention autocomplete.
 
-[#5484](https://github.com/block/buzz/pull/5484) is the actual fix - it sources verified
-NIP-OA ownership from `kind:0` profiles so `owner-only` has an owner to compare against.
-[#5483](https://github.com/block/buzz/pull/5483) matters too: it reads the union of
-`kind:10100` and `kind:30177` for the directory, which is the other half of "publishing
-kind:10100 helps a headless seat" - without it, publishing 10100 populates a directory
-Desktop's own mention picker still doesn't consult for external agents. Both are open, not
-yet merged, as of this writing.
+**Update 2026-08-19: the client-side half of this is now live on `main`.** [#5484](https://github.com/block/buzz/pull/5484)
+proposed sourcing verified NIP-OA ownership from `kind:0` profiles so `owner-only` has an
+owner to compare against; that behaviour is confirmed present in
+`desktop/src/features/agents/lib/agentAutocompleteEligibility.ts` on `main` today - the
+`owner-only` branch now compares `agent.ownerPubkey`, no longer an unconditional `false`.
+#5484 itself still shows open with no merge commit, so the capability evidently landed via
+the mention-authorization rework in #6086/#6182/#6224 (all merged 2026-08-18) rather than
+through that PR directly; treat #5484 as superseded, not as the thing to keep watching.
+
+[#5483](https://github.com/block/buzz/pull/5483), the other half - directory reads the union
+of `kind:10100` and `kind:30177` - was **closed 2026-08-18, not merged**: the author confirmed
+`main` (via the same #6086/#6182/#6224 rework) already implements the union, seeded from
+relay-signed `kind:39002` membership rather than this PR's unfiltered relay-wide read, which
+the closing comment argues is the safer of the two. Nothing left to watch there either.
 
 Two things that look like solutions and are not:
 
@@ -68,8 +75,9 @@ regression is exactly what the issue is about.
 (open) reports that on a *closed* relay (`require_relay_membership = true`, our config) the
 NIP-OA owner attestation is silently dropped for an agent that is a *direct* relay member
 (also our config) - `users.agent_owner_pubkey` never gets populated, only the inverse
-(open relay, or membership granted via the owner) works. So even after #5484 merges,
-`owner-only` would still not resolve an owner for us specifically. A 2026-08-15 comment on
+(open relay, or membership granted via the owner) works. So even with the client-side owner
+comparison now live, `owner-only` still would not resolve an owner for us specifically -
+the relay never hands the client an owner to compare against. A 2026-08-15 comment on
 that issue adds that the same code path 403s NIP-AM turn-metric events
 (`kind:44200`, added by #4950, merged 2026-08-12) for every agent in this shape - something
 to watch for before bumping `buzz-agent-tools` past that rev.
