@@ -18,6 +18,14 @@ rustPlatform.buildRustPackage rec {
 
   # The workspace lock file pulls ~40 git dependencies; allowBuiltinFetchGit avoids
   # hand-maintaining an outputHashes entry for every one of them.
+  # The vendored lock below is not merely a copy of upstream's - it carries a
+  # security bump upstream has not made (h2 >= 0.4.16, RUSTSEC-2026-0258).
+  # rustPlatform asserts the source tree's Cargo.lock is byte-identical to the
+  # vendored one and fails the build otherwise, so the source's copy is replaced
+  # with ours before that check runs. Without this the two differ by exactly the
+  # bumped crate and the build stops at patchPhase.
+  postPatch = "cp ${./Cargo.lock} Cargo.lock";
+
   cargoLock = {
     lockFile = ./Cargo.lock;   # vendored: keeps eval pure (no import-from-derivation)
     allowBuiltinFetchGit = true;
