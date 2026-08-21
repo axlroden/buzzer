@@ -14,6 +14,47 @@ Two audiences:
 Buzz moves fast. An entry going stale is the expected outcome, not a surprise - the point of
 this file is that nobody has to rediscover *why* a line of config is there.
 
+## Dependency pins and advisories
+
+`pkgs/buzz-agent-tools.nix` pins one upstream commit of `block/buzz` and vendors that
+commit's `Cargo.lock` next to it. **The lock is ours**, which is what makes a security
+bump possible without moving the pin: a registry crate can be raised in the vendored
+lock against the same source commit.
+
+Position as of 2026-08-20, checked against the RustSec advisory DB rather than branch
+names:
+
+| Advisory | Crate | Needs | Status |
+|---|---|---|---|
+| RUSTSEC-2026-0258 | `h2` | >= 0.4.16 | cleared, lockfile-only bump on the existing pin |
+| RUSTSEC-2026-0225..0230 | `nostr` | >= 0.44.7 | already clear - the pin ships 0.44.7 |
+| RUSTSEC-2026-0231, 0232 | `nostr-relay-pool` | >= 0.44.3 | already clear - the pin ships 0.44.3 |
+
+Eight of those nine were cleared by the bump to `631b05c`, which was made for an
+unrelated reason (claude-agent-acp system prompt delivery) and happened to be a
+descendant of the commit that fixed them. Nothing recorded that at the time, so the
+backlog read nine deep when it was one. **If you are counting open advisories, read the
+vendored lock, not the branch names.**
+
+### Do NOT merge `fix/buzz-agent-tools-rustsec-nostr-bump` - superseded 2026-08-20
+
+That branch pins `318fbf8` and its commit message says it clears
+RUSTSEC-2026-0225..0232, so it reads like eight outstanding fixes. It is a **revert**.
+
+`318fbf8` is an *ancestor* of the pin master already carries: the upstream history is
+`318fbf8` -> 29 commits -> `631b05c` (master) -> 253 commits -> `cc8a8b0d`. Its crate
+versions are identical to master's, so it fixes nothing that is not already fixed, and
+merging it would move the pin backwards 29 commits and undo the acp system-prompt fix
+that is currently live.
+
+The general trap, because it will recur with any pin branch: **a stale branch is not
+automatically behind on its purpose, but it is always behind on its base - and for a
+branch whose entire content is a pin, being behind on the base makes it a revert wearing
+a fix's name.** Check ancestry (`gh api repos/block/buzz/compare/A...B`) before merging
+any bump that has been waiting.
+
+The branch is kept, not deleted, so this reasoning stays attached to something.
+
 ## Waiting on upstream
 
 | ID | Workaround | Watch | Clear when |
