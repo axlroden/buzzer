@@ -63,7 +63,7 @@ The branch is kept, not deleted, so this reasoning stays attached to something.
 | W5 | Relay runs from the upstream container image, not built from source | not filed | Upstream publishes the frontend assets, or a source build produces the web surface |
 | W6 | Postgres needs `enableTCPIP` + a loopback `trust` rule | gated on W5 | The relay no longer runs in a container |
 | W8 | Since desktop v0.5.12, the agent lost @-mentionability: the send-boundary gate requires `kind:10100` `channel_ids`/`respond_to` fields that nothing in this stack publishes | [#5681](https://github.com/block/buzz/pull/5681) (merged, the regression), [#5869](https://github.com/block/buzz/issues/5869), [#5878](https://github.com/block/buzz/pull/5878), [#5928](https://github.com/block/buzz/issues/5928) | #5878 or #5928 merges (either publishes our agent's `kind:10100` directory record) and we adopt it, or the gate ships a membership-based fallback |
-| W9 | `buzz-acp`'s MCP shell config puts `BUZZ_PRIVATE_KEY`/`BUZZ_AUTH_TAG` in reach of model-controlled shell commands - this deployment gives the agent unit a shell (see README, "The agent replies by shelling out") | [#2883](https://github.com/block/buzz/issues/2883), [#5288](https://github.com/block/buzz/pull/5288) | #5288 merges (isolates the signing key behind a session capability, adds a typed `buzz_send_message` tool) - would also let us drop the shell workaround entirely |
+| W9 | `buzz-acp`'s MCP shell config puts `BUZZ_PRIVATE_KEY`/`BUZZ_AUTH_TAG` in reach of model-controlled shell commands - this deployment gives the agent unit a shell (see README, "The agent replies by shelling out") | [#2883](https://github.com/block/buzz/issues/2883) (closed 2026-08-22, no fix merged - see below), [#5288](https://github.com/block/buzz/pull/5288) | #5288 (or an equivalent fix) merges - would also let us drop the shell workaround entirely |
 
 ### W1 - badged or mentionable, not both
 
@@ -260,13 +260,20 @@ This deployment gives the `buzz-agent` systemd unit a shell because the ACP harn
 prompt has the agent reply by shelling out to `buzz messages send` rather than taking the
 reply from the backend's final text (see README, "The agent replies by shelling out").
 
-[#2883](https://github.com/block/buzz/issues/2883) (open) reports that `buzz-acp` puts
+[#2883](https://github.com/block/buzz/issues/2883) reports that `buzz-acp` puts
 `BUZZ_PRIVATE_KEY` in the MCP shell tool's environment, and `BUZZ_AUTH_TAG` goes with it. Any
 command the agent runs - including ones the model, not an adversary, chooses to run - can
 read the raw signing key. A 2026-08-15 comment on the issue is a real (not hypothetical)
 repro: an agent asked a benign question ran `env | grep`, printed the key, and it was
 rendered verbatim into the channel transcript, visible to every member. Provider API keys
 are *not* exported into the same shell - only the Buzz signing material is.
+
+A maintainer closed #2883 as completed on 2026-08-22, but no fix merged to close it out -
+[#5288](https://github.com/block/buzz/pull/5288), the actual code fix, is still open. The
+closing comment gives no alternative PR or workaround that landed either; the last activity
+before the close is an unrelated third party's client-side mitigation in a companion project,
+not an upstream fix. Treat the closure as bookkeeping, not a resolution: `BUZZ_PRIVATE_KEY`
+is exposed to the agent's shell today exactly as before.
 
 [#5288](https://github.com/block/buzz/pull/5288) (open) is the fix in progress: keep the
 signing key inside `buzz-acp`, give the shell no publishing capability, and add a typed
