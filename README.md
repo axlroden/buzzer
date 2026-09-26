@@ -357,7 +357,9 @@ built the same way.
    silently reverts them; `nix flake check` catches a regression through
    `checks.cargo-audit`, but only for advisories the audit DB already knows.
 3. Re-pin `relay.image` to the matching digest
-   (`docker buildx imagetools inspect ghcr.io/block/buzz:main` prints it without a pull).
+   (`skopeo inspect --no-tags docker://ghcr.io/block/buzz:main | jq -r .Digest` prints it
+   without a pull). A tag is not a pin: oci-containers pulls it once and never refreshes
+   it, so `:main` is whatever was current at first boot, and a re-pull moves it silently.
 
 ## Security notes
 
