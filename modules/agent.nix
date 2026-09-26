@@ -11,11 +11,20 @@
 
 let
   cfg = config.services.buzz-agent;
-  buzz-agent-tools = pkgs.callPackage ../pkgs/buzz-agent-tools.nix { };
 in
 {
   options.services.buzz-agent = {
     enable = lib.mkEnableOption "a headless Buzz agent (buzz-acp driving an ACP-speaking coding agent)";
+
+    package = lib.mkOption {
+      type = lib.types.package;
+      default = pkgs.callPackage ../pkgs/buzz-agent-tools.nix { };
+      defaultText = lib.literalExpression "pkgs.callPackage ../pkgs/buzz-agent-tools.nix { }";
+      description = ''
+        The agent-side binaries (`buzz-acp`, `buzz`, `git-credential-nostr`). The one
+        place to override the build; `services.buzzer` reuses it for the system PATH.
+      '';
+    };
 
     environmentFile = lib.mkOption {
       type = lib.types.path;
@@ -53,7 +62,10 @@ in
     stateDir = lib.mkOption {
       type = lib.types.str;
       default = "/var/lib/buzz-agent";
-      description = "Agent home and state directory - the only path it may write to.";
+      description = ''
+        Agent home and state directory - the only path it may write to. Must be a
+        direct child of /var/lib: it is also the unit's StateDirectory.
+      '';
     };
 
     backendPackages = lib.mkOption {
@@ -82,6 +94,17 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = [{
+      assertion = lib.hasPrefix "/var/lib/" cfg.stateDir
+        && !lib.hasInfix "/" (lib.removePrefix "/var/lib/" cfg.stateDir)
+        && cfg.stateDir != "/var/lib/";
+      message = ''
+        services.buzz-agent.stateDir must be a direct child of /var/lib (got
+        "${cfg.stateDir}"): the unit's StateDirectory is derived from its basename, so
+        any other location would silently create an unused /var/lib/<basename> instead.
+      '';
+    }];
+
     users.users.${cfg.user} = {
       isSystemUser = true;
       group = cfg.user;
@@ -98,11 +121,11 @@ in
       # bashInteractive and the buzz CLI are NOT optional: the harness's base prompt tells the
       # agent to reply by shelling out to `buzz messages send`, so without a shell it reacts,
       # runs a full turn, and posts nothing.
-      path = [ buzz-agent-tools pkgs.bashInteractive pkgs.git ]
+      path = [ cfg.package pkgs.bashInteractive pkgs.git ]
         ++ cfg.backendPackages
         ++ cfg.extraPackages;
       serviceConfig = {
-        ExecStart = "${buzz-agent-tools}/bin/buzz-acp";
+        ExecStart = "${cfg.package}/bin/buzz-acp";
         EnvironmentFile = cfg.environmentFile;
         User = cfg.user;
         Group = cfg.user;
