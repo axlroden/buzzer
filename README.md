@@ -25,7 +25,7 @@ agent is a permanent member of the workspace rather than a feature of one machin
 | Buzz relay | upstream container image, host networking |
 | `buzz-acp`, `buzz` CLI, `git-credential-nostr` | **built from source** by this flake |
 | Ingress | optional Cloudflare tunnel |
-| Backups | optional nightly `pg_dump`, auto-pruned |
+| Backups | optional nightly `pg_dump`, one dated file per run, pruned after `backup.keepDays` |
 
 Only the ingress is reachable from outside the host; every data service binds to
 `127.0.0.1`.
@@ -69,7 +69,7 @@ agent extra tools with `extraPackages`.
     seaweedfs.s3ConfigFile  = "/etc/buzz/seaweedfs-s3.json";
     agent.enable            = true;
     agent.environmentFile   = "/etc/buzz/agent.env";
-    backup.enable           = true;   # nightly pg_dump, pruned after 14 days
+    backup.enable           = true;   # nightly dated pg_dump, pruned after 14 days
     tunnel.enable           = true;
     tunnel.name             = "buzz-tunnel";
     tunnel.credentialsFile  = "/etc/cloudflared/credentials.json";
@@ -92,7 +92,7 @@ Regression tests for failures this module has actually had, not smoke tests:
 | Test | Guards |
 |---|---|
 | `agent-only` | the agent runs with **no** relay/database/object store; `SHELL` is set and a shell plus the `buzz` CLI are on its PATH (without them it reacts, runs a full turn and posts nothing); the systemd sandbox is applied |
-| `workspace` | SeaweedFS binds S3/volume/filer/master and **not** 8080 (which the relay takes); nothing listens beyond loopback; the relay is told to bind loopback; Postgres refuses the owning role over TCP without its password and the composed `DATABASE_URL` authenticates; Redis demands its password; **S3 enforces conditional writes** - a second `If-None-Match: *` gets 412 and the first writer's bytes survive |
+| `workspace` | SeaweedFS binds S3/volume/filer/master and **not** 8080 (which the relay takes); nothing listens beyond loopback; the relay is told to bind loopback; Postgres refuses the owning role over TCP without its password and the composed `DATABASE_URL` authenticates; Redis demands its password; **S3 enforces conditional writes** - a second `If-None-Match: *` gets 412 and the first writer's bytes survive; dumps are dated, `0600`, and an old one is pruned only once a new one exists |
 
 The conditional-write case is the one that matters most: it is the property Buzz's git object
 store depends on, the reason Garage was unusable, and it fails silently at the storage layer
