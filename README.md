@@ -48,8 +48,10 @@ Nothing else is required - no relay, no Postgres, no object store:
 }
 ```
 
-Swap the backend with `backendPackages` (defaults to Claude Code's ACP adapter), and give the
-agent extra tools with `extraPackages`.
+Swap the backend with `backendPackages` (defaults to Claude Code's ACP adapter), give the
+agent extra tools with `extraPackages`, and override the agent binaries themselves with
+`package` (the flake also exports them as `packages.<system>.buzz-agent-tools` and through
+`overlays.default`).
 
 ### The whole workspace
 

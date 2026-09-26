@@ -7,7 +7,12 @@
     disko.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, disko }: {
+  outputs = { self, nixpkgs, disko }:
+  let
+    systems = [ "x86_64-linux" "aarch64-linux" ];
+    forAll = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+  in
+  {
     # Two reusable pieces, deliberately separable:
     #   buzzer     - the whole workspace: relay, data services, ingress, backups
     #   buzz-agent - just the headless agent, usable against ANY relay you are a member of
@@ -27,20 +32,22 @@
       ];
     };
 
-    packages.x86_64-linux.buzz-agent-tools =
-      nixpkgs.legacyPackages.x86_64-linux.callPackage ./pkgs/buzz-agent-tools.nix { };
+    # `pkgs.buzz-agent-tools` for consumers who compose their own package set; the
+    # modules default to the same derivation.
+    overlays.default = final: _prev: {
+      buzz-agent-tools = final.callPackage ./pkgs/buzz-agent-tools.nix { };
+    };
+
+    packages = forAll (pkgs: {
+      buzz-agent-tools = pkgs.callPackage ./pkgs/buzz-agent-tools.nix { };
+      default = pkgs.callPackage ./pkgs/buzz-agent-tools.nix { };
+    });
 
     # NixOS VM tests. Run with: nix flake check  (or `nix build .#checks.x86_64-linux.<name>`)
     # These are regression tests for failures this module has actually had, not smoke tests.
-    checks.x86_64-linux = {
-      workspace = import ./tests/workspace.nix {
-        pkgs = nixpkgs.legacyPackages.x86_64-linux;
-        inherit self;
-      };
-      agent-only = import ./tests/agent-only.nix {
-        pkgs = nixpkgs.legacyPackages.x86_64-linux;
-        inherit self;
-      };
-    };
+    checks = forAll (pkgs: {
+      workspace = import ./tests/workspace.nix { inherit pkgs self; };
+      agent-only = import ./tests/agent-only.nix { inherit pkgs self; };
+    });
   };
 }
