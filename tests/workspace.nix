@@ -141,6 +141,22 @@ pkgs.testers.runNixOSTest {
         assert body == "first", f"losing racer overwrote the winner: got {body!r}"
 
     with subtest("nightly dump is scheduled"):
-        machine.succeed("systemctl list-timers --all | grep -q postgresqlBackup")
+        machine.succeed("systemctl list-timers --all | grep -q buzz-backup")
+
+    with subtest("dumps are dated, private, and pruned only behind a fresh one"):
+        # Regression: the previous shape kept two files overwritten in place under a
+        # tmpfiles age rule, so there was never any history and a stalled timer would
+        # have deleted the only dumps.
+        machine.succeed("systemctl start buzz-backup")
+        first = machine.succeed("ls /var/backup/buzz").split()
+        assert len(first) == 1 and first[0].startswith("buzz-") and first[0].endswith(".sql.gz"), first
+        assert machine.succeed(f"stat -c %a:%U /var/backup/buzz/{first[0]}").strip() == "600:postgres"
+        machine.succeed(f"gzip -dc /var/backup/buzz/{first[0]} | grep -q 'PostgreSQL database dump'")
+        # An old dump is pruned once a new one has landed; the new one survives.
+        machine.succeed("touch -d '20 days ago' /var/backup/buzz/buzz-2026-01-01T000000Z.sql.gz")
+        machine.succeed("sleep 1; systemctl start buzz-backup")
+        after = machine.succeed("ls /var/backup/buzz").split()
+        assert "buzz-2026-01-01T000000Z.sql.gz" not in after, after
+        assert first[0] in after and len(after) == 2, after
   '';
 }
