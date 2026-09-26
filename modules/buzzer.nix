@@ -141,12 +141,20 @@ in
       directory = lib.mkOption {
         type = lib.types.str;
         default = "/var/backup/buzz";
-        description = "Where dumps are written.";
+        description = "Where dumps are written, one dated file per run.";
       };
       keepDays = lib.mkOption {
-        type = lib.types.int;
+        type = lib.types.ints.positive;
         default = 14;
-        description = "Dumps older than this are pruned.";
+        description = ''
+          Dumps older than this are pruned, but only right after a new dump has
+          succeeded, so a stalled timer can never leave the directory empty.
+        '';
+      };
+      startAt = lib.mkOption {
+        type = lib.types.str;
+        default = "*-*-* 03:15:00";
+        description = "systemd calendar expression for the dump timer.";
       };
     };
 
@@ -320,16 +328,47 @@ in
     # ------------------------------------------------------------------ backups
     # The relay's state (community, channels, members, identities) is all in Postgres;
     # object storage only holds media. A dump is therefore the thing worth keeping.
-    services.postgresqlBackup = lib.mkIf cfg.backup.enable {
-      enable = true;
-      databases = [ cfg.database.name ];
-      location = cfg.backup.directory;
-      startAt = "*-*-* 03:15:00";
-    };
+    #
+    # Own unit rather than services.postgresqlBackup: that module keeps exactly two files
+    # (current and previous, overwritten in place), so "keepDays" of history never
+    # existed, and a tmpfiles age rule on top of it would have deleted the only two dumps
+    # the first time the timer stalled that long. Dated files, pruned only after a fresh
+    # dump has landed.
     systemd.tmpfiles.rules = lib.mkIf cfg.backup.enable [
       "d ${cfg.backup.directory} 0700 postgres postgres - -"
-      "e ${cfg.backup.directory} - - - ${toString cfg.backup.keepDays}d"
     ];
+    systemd.services.buzz-backup = lib.mkIf cfg.backup.enable {
+      description = "Dated pg_dump of the Buzz database";
+      requires = [ "postgresql.service" ];
+      after = [ "postgresql.service" ];
+      path = [ pkgs.coreutils pkgs.findutils pkgs.gzip config.services.postgresql.package ];
+      serviceConfig = {
+        Type = "oneshot";
+        User = "postgres";
+        Group = "postgres";
+        UMask = "0077";
+        ReadWritePaths = [ cfg.backup.directory ];
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateTmp = true;
+        NoNewPrivileges = true;
+      };
+      script = ''
+        set -euo pipefail
+        dir=${lib.escapeShellArg cfg.backup.directory}
+        out="$dir/${cfg.database.name}-$(date -u +%Y-%m-%dT%H%M%SZ).sql.gz"
+        pg_dump ${lib.escapeShellArg cfg.database.name} | gzip -c --rsyncable > "$out.in-progress"
+        mv "$out.in-progress" "$out"
+        echo "wrote $out"
+        # Prune only now that a new dump exists, so the directory never empties.
+        find "$dir" -maxdepth 1 -type f -name ${lib.escapeShellArg "${cfg.database.name}-*.sql.gz"} \
+          -mtime +${toString cfg.backup.keepDays} -print -delete | sed 's/^/pruned /'
+      '';
+    };
+    systemd.timers.buzz-backup = lib.mkIf cfg.backup.enable {
+      wantedBy = [ "timers.target" ];
+      timerConfig = { OnCalendar = cfg.backup.startAt; Persistent = true; };
+    };
 
     # ------------------------------------------------------------------ ingress
     services.cloudflared = lib.mkIf cfg.tunnel.enable {
