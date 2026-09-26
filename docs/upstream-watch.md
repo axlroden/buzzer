@@ -21,14 +21,25 @@ commit's `Cargo.lock` next to it. **The lock is ours**, which is what makes a se
 bump possible without moving the pin: a registry crate can be raised in the vendored
 lock against the same source commit.
 
-Position as of 2026-08-20, checked against the RustSec advisory DB rather than branch
-names:
+Position as of 2026-09-27, from `cargo audit -f pkgs/Cargo.lock` (which `nix flake
+check` now runs, see `checks.cargo-audit`) plus a reachability walk from the three crates
+this flake actually builds (`cargo tree --locked -p buzz-acp -p buzz-cli
+-p git-credential-nostr -i <crate>`). An advisory in the lock is only a problem for us if
+one of those three reaches the crate; the relay runs from upstream's image and is
+upstream's to patch.
 
-| Advisory | Crate | Needs | Status |
-|---|---|---|---|
-| RUSTSEC-2026-0258 | `h2` | >= 0.4.16 | cleared, lockfile-only bump on the existing pin |
-| RUSTSEC-2026-0225..0230 | `nostr` | >= 0.44.7 | already clear - the pin ships 0.44.7 |
-| RUSTSEC-2026-0231, 0232 | `nostr-relay-pool` | >= 0.44.3 | already clear - the pin ships 0.44.3 |
+| Advisory | Crate | Needs | Reachable from our binaries | Status |
+|---|---|---|---|---|
+| RUSTSEC-2026-0285 | `rustls` | >= 0.23.45 | yes (buzz-acp, buzz-cli) | cleared 2026-09-27, lockfile bump (with rustls-webpki 0.103.15, aws-lc-rs 1.18.1 / aws-lc-sys 0.45.0 it requires) |
+| RUSTSEC-2026-0258 | `h2` | >= 0.4.16 | yes | cleared, lockfile-only bump on the existing pin |
+| RUSTSEC-2026-0257 | `webbrowser` | >= 1.2.2 | no | cleared 2026-09-01 anyway (#9); the bump was a no-op for what we ship |
+| RUSTSEC-2026-0194, 0195 | `quick-xml` 0.38.4 / 0.39.4 | >= 0.41.0 | no (relay only) | open in the lock; a semver-major bump upstream has to make. Ignored in `checks.cargo-audit` for that reason |
+| RUSTSEC-2026-0225..0230 | `nostr` | >= 0.44.7 | yes | already clear - the pin ships 0.44.7 |
+| RUSTSEC-2026-0231, 0232 | `nostr-relay-pool` | >= 0.44.3 | - | already clear - the pin ships 0.44.3 |
+
+The lockfile bumps to re-apply after copying a new upstream lock (README, "Updating the
+pins"): `rustls` >= 0.23.45, `h2` >= 0.4.16, `webbrowser` >= 1.2.2 - unless upstream's
+lock already carries them.
 
 Eight of those nine were cleared by the bump to `631b05c`, which was made for an
 unrelated reason (claude-agent-acp system prompt delivery) and happened to be a
