@@ -1,0 +1,3 @@
+# W20 (repeated keys) is deliberate here: modules set `services.<x>` and
+# `systemd.services.<x>` as separate top-level paths so each service reads as one block.
+disabled = ["repeated_keys"]

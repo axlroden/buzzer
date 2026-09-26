@@ -84,15 +84,21 @@ type-checks the module against.
 ## Tests
 
 ```bash
-nix flake check                          # both VM tests (Linux; needs KVM to be quick)
+nix flake check                          # both VM tests (Linux; needs KVM to be quick) + cargo audit
 nix build .#checks.x86_64-linux.workspace -L
+nix build .#checks.x86_64-linux.cargo-audit -L   # the vendored lock against the RustSec DB
 ```
+
+CI (`.github/workflows/ci.yml`) runs the evaluation, deadnix, statix and the audit on every
+push and PR. The VM tests need the Rust build and KVM, so they are the local gate before
+merging a module change, not a CI step.
 
 Regression tests for failures this module has actually had, not smoke tests:
 
 | Test | Guards |
 |---|---|
 | `agent-only` | the agent runs with **no** relay/database/object store; `SHELL` is set and a shell plus the `buzz` CLI are on its PATH (without them it reacts, runs a full turn and posts nothing); the systemd sandbox is applied |
+| `cargo-audit` | `pkgs/Cargo.lock` has no known vulnerability reachable from the built crates; advisories the relay alone reaches are ignored by id, with the reasoning in `docs/upstream-watch.md` |
 | `workspace` | SeaweedFS binds S3/volume/filer/master and **not** 8080 (which the relay takes); nothing listens beyond loopback; Postgres accepts the owning role over TCP; Redis demands its password; **S3 enforces conditional writes** - a second `If-None-Match: *` gets 412 and the first writer's bytes survive |
 
 The conditional-write case is the one that matters most: it is the property Buzz's git object
