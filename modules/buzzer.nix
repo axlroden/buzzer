@@ -45,7 +45,19 @@ in
       port = lib.mkOption {
         type = lib.types.port;
         default = 3000;
-        description = "Loopback port the relay listens on.";
+        description = ''
+          Loopback port the relay listens on. Passed to the relay as BUZZ_BIND_ADDR
+          (127.0.0.1:port) and used as the tunnel's upstream.
+        '';
+      };
+      extraEnvironment = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        default = { };
+        example = { BUZZ_REQUIRE_RELAY_MEMBERSHIP = "true"; };
+        description = ''
+          Non-secret relay environment, set on the container in the Nix store. Anything
+          secret belongs in `environmentFile` instead. Cannot override BUZZ_BIND_ADDR.
+        '';
       };
       environmentFile = lib.mkOption {
         type = lib.types.path;
@@ -232,14 +244,21 @@ in
     virtualisation.oci-containers.containers.buzz-relay = {
       image = cfg.relay.image;
       autoStart = true;
-      # Host networking: the relay reaches the data services on loopback and stays
-      # unreachable from outside this host.
+      # Host networking: the relay reaches the data services on loopback. It is the
+      # bind address, not host networking, that keeps it off the wire: the relay's own
+      # default is 0.0.0.0:3000, so without BUZZ_BIND_ADDR it listens on every interface
+      # and only the host firewall stands between it and the LAN.
       extraOptions = [ "--network=host" ];
+      environment = cfg.relay.extraEnvironment // {
+        BUZZ_BIND_ADDR = "127.0.0.1:${toString cfg.relay.port}";
+      };
       environmentFiles = [ cfg.relay.environmentFile ];
     };
     systemd.services.docker-buzz-relay = {
       after = [ "postgresql.service" "redis-buzz.service" "seaweedfs.service" ];
-      requires = [ "postgresql.service" ];
+      # The relay refuses to start without its object store and needs Redis for auth
+      # nonces, so all three are hard requirements, not just ordering.
+      requires = [ "postgresql.service" "redis-buzz.service" "seaweedfs.service" ];
     };
 
     # ------------------------------------------------------------------ agent

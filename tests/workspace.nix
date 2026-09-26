@@ -72,6 +72,17 @@ pkgs.testers.runNixOSTest {
                 assert a.startswith("127.0.0.1:") or a.startswith("[::1]:"), \
                     f"port {port} is bound beyond loopback: {a}"
 
+    with subtest("the relay is told to bind loopback"):
+        # Regression: the relay's own default is 0.0.0.0:3000. `relay.port` used to feed
+        # only the tunnel URL, so the relay listened on every interface and the README's
+        # "unreachable from outside this host" held only because of the host firewall.
+        unit = machine.succeed("systemctl cat docker-buzz-relay")
+        assert "BUZZ_BIND_ADDR=127.0.0.1:3000" in unit, unit
+        # And the data services are hard requirements, not just ordering.
+        req = machine.succeed("systemctl show docker-buzz-relay -p Requires --value")
+        for u in ["postgresql.service", "redis-buzz.service", "seaweedfs.service"]:
+            assert u in req, f"{u} missing from Requires: {req}"
+
     with subtest("postgres accepts the owning role over TCP"):
         # The relay is a container: it shares the network namespace but not the mounts, so
         # it needs TCP plus the loopback trust rule rather than the unix socket.
