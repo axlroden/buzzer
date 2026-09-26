@@ -12,8 +12,12 @@
     enable = true;
     domain = "buzz.example.com";
 
-    # Pin by digest: docker inspect ghcr.io/block/buzz:main --format '{{index .RepoDigests 0}}'
-    relay.image = "ghcr.io/block/buzz:main";
+    # Pinned by digest. A tag is neither pinned nor tracking: oci-containers pulls it
+    # once and never refreshes it, so `:main` would silently be whatever was current at
+    # first boot. Bump it deliberately, alongside the crate pin (README, "Updating the
+    # pins"): skopeo inspect --no-tags docker://ghcr.io/block/buzz:main | jq -r .Digest
+    # (2026-09-26 build below)
+    relay.image = "ghcr.io/block/buzz@sha256:ac4521f3e464c9dd09c92de52697182257da95e62b3c723805688594257fa74e";
     relay.environmentFile = "/etc/buzz/relay.env";
 
     redis.passwordFile  = "/etc/buzz/redis.pass";

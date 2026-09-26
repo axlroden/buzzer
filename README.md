@@ -347,7 +347,10 @@ built the same way.
 
 Bump `rev`/`hash` in `pkgs/buzz-agent-tools.nix`
 (`nix flake prefetch --json github:block/buzz/<rev> | jq -r .hash`), copy that revision's
-`Cargo.lock` into `pkgs/`, and re-pin `relay.image` to the matching digest.
+`Cargo.lock` into `pkgs/`, and re-pin `relay.image` to the matching digest
+(`skopeo inspect --no-tags docker://ghcr.io/block/buzz:main | jq -r .Digest` prints it
+without a pull). A tag is not a pin: oci-containers pulls it once and never refreshes it,
+so `:main` is whatever was current at first boot, and a re-pull moves it silently.
 
 ## Security notes
 
