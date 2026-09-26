@@ -29,6 +29,9 @@ pkgs.testers.runNixOSTest {
       domain = "buzz.test";
       relay.environmentFile = pkgs.writeText "relay.env" "BUZZ_DOMAIN=buzz.test\n";
       redis.passwordFile = pkgs.writeText "redis.pass" "testpassword";
+      # Deliberately awkward: a URL-reserved character and a quote, to prove both the
+      # ALTER ROLE quoting and the DATABASE_URL encoding.
+      database.passwordFile = pkgs.writeText "pg.pass" "p@ss'word\n";
       seaweedfs.s3ConfigFile = s3Config;
       agent.enable = false;
       backup.enable = true;
@@ -72,10 +75,26 @@ pkgs.testers.runNixOSTest {
                 assert a.startswith("127.0.0.1:") or a.startswith("[::1]:"), \
                     f"port {port} is bound beyond loopback: {a}"
 
-    with subtest("postgres accepts the owning role over TCP"):
+    with subtest("postgres refuses the owning role over TCP without its password"):
+        # Regression: this was a `trust` rule, so any local process - the co-hosted agent
+        # included - could connect as the owning role and rewrite membership.
+        out = machine.fail("psql -w -h 127.0.0.1 -U buzz -d buzz -c 'select 1' 2>&1")
+        assert "password" in out, out
+        out = machine.fail("PGPASSWORD=wrong psql -w -h 127.0.0.1 -U buzz -d buzz -c 'select 1' 2>&1")
+        assert "password authentication failed" in out, out
+
+    with subtest("postgres accepts the owning role over TCP with its password"):
         # The relay is a container: it shares the network namespace but not the mounts, so
-        # it needs TCP plus the loopback trust rule rather than the unix socket.
-        machine.succeed("psql -h 127.0.0.1 -U buzz -d buzz -c 'select 1'")
+        # it needs TCP plus a password rather than the unix socket.
+        machine.succeed("PGPASSWORD=\"p@ss'word\" psql -w -h 127.0.0.1 -U buzz -d buzz -c 'select 1'")
+
+    with subtest("the relay's DATABASE_URL is composed from the same password"):
+        machine.succeed("systemctl start buzz-relay-env")
+        url = machine.succeed("cat /run/buzz-relay/db.env").strip()
+        assert url == "DATABASE_URL=postgres://buzz:p%40ss%27word@127.0.0.1:5432/buzz", url
+        assert machine.succeed("stat -c %a /run/buzz-relay/db.env").strip() == "600"
+        # And that URL really authenticates.
+        machine.succeed("psql -w 'postgres://buzz:p%40ss%27word@127.0.0.1:5432/buzz' -c 'select 1'")
 
     with subtest("redis requires its password"):
         # redis-cli exits 0 even when the server refuses, so assert on the reply, not $?.

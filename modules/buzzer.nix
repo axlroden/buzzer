@@ -58,10 +58,21 @@ in
       };
     };
 
-    database.name = lib.mkOption {
-      type = lib.types.str;
-      default = "buzz";
-      description = "Postgres database and owning role.";
+    database = {
+      name = lib.mkOption {
+        type = lib.types.str;
+        default = "buzz";
+        description = "Postgres database and owning role.";
+      };
+      passwordFile = lib.mkOption {
+        type = lib.types.path;
+        example = "/etc/buzz/postgres.pass";
+        description = ''
+          File holding the password of the owning role, one line, kept out of the Nix
+          store. It is set on the role at every Postgres start and used to compose the
+          relay's DATABASE_URL, so it does not need to appear in `relay.environmentFile`.
+        '';
+      };
     };
 
     redis.passwordFile = lib.mkOption {
@@ -152,12 +163,25 @@ in
       # The relay runs in a container: it shares the host network namespace but NOT the
       # mount namespace, so it cannot use the unix socket and needs TCP on loopback.
       enableTCPIP = true;
-      authentication = lib.mkAfter ''
-        # Loopback only, and the firewall exposes nothing but SSH, so trust here is
-        # equivalent to the unix-socket peer trust it replaces.
-        host ${cfg.database.name} ${cfg.database.name} 127.0.0.1/32 trust
+      # Password auth, not trust. TCP trust checks nothing about the caller, unlike the
+      # unix-socket peer rule it stands in for: any local process could have connected as
+      # the owning role, and the co-hosted agent runs model-driven shell commands on this
+      # very host with AF_INET allowed. Plain priority, so it sorts ahead of the NixOS
+      # module's mkAfter defaults (first match wins in pg_hba).
+      authentication = ''
+        host ${cfg.database.name} ${cfg.database.name} 127.0.0.1/32 scram-sha-256
       '';
       settings.listen_addresses = lib.mkForce "127.0.0.1";
+    };
+    # The password is (re)applied on every start so rotating it is: edit the file, restart
+    # postgresql, restart the relay. Read through a systemd credential so the file can stay
+    # root-owned 0600; psql's :'var' quoting makes any password safe to pass.
+    systemd.services.postgresql = {
+      serviceConfig.LoadCredential = [ "buzz-db-password:${cfg.database.passwordFile}" ];
+      postStart = lib.mkAfter ''
+        $PSQL -v ON_ERROR_STOP=1 -v pw="$(cat "$CREDENTIALS_DIRECTORY/buzz-db-password")" \
+          -c "ALTER ROLE \"${cfg.database.name}\" PASSWORD :'pw'"
+      '';
     };
 
     # Stock Redis via the NixOS module. Everything the relay keeps here is ephemeral and
@@ -235,7 +259,29 @@ in
       # Host networking: the relay reaches the data services on loopback and stays
       # unreachable from outside this host.
       extraOptions = [ "--network=host" ];
-      environmentFiles = [ cfg.relay.environmentFile ];
+      # Last wins in docker's --env-file handling, so the generated DATABASE_URL takes
+      # precedence over a stale copy left in the user's file.
+      environmentFiles = [ cfg.relay.environmentFile "/run/buzz-relay/db.env" ];
+    };
+    # Composes DATABASE_URL from the password file so the secret lives in exactly one
+    # place. A separate oneshot rather than a preStart so it can be exercised without
+    # pulling the relay image.
+    systemd.services.buzz-relay-env = {
+      description = "Compose the relay's DATABASE_URL from the Postgres password file";
+      requiredBy = [ "docker-buzz-relay.service" ];
+      before = [ "docker-buzz-relay.service" ];
+      path = [ pkgs.coreutils pkgs.jq ];
+      serviceConfig = {
+        Type = "oneshot";
+        RuntimeDirectory = "buzz-relay";
+        RuntimeDirectoryMode = "0700";
+        UMask = "0077";
+      };
+      script = ''
+        pw=$(jq -rR @uri < ${lib.escapeShellArg (toString cfg.database.passwordFile)})
+        printf 'DATABASE_URL=postgres://%s:%s@127.0.0.1:5432/%s\n' \
+          ${cfg.database.name} "$pw" ${cfg.database.name} > /run/buzz-relay/db.env
+      '';
     };
     systemd.services.docker-buzz-relay = {
       after = [ "postgresql.service" "redis-buzz.service" "seaweedfs.service" ];
