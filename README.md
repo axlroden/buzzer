@@ -19,7 +19,7 @@ agent is a permanent member of the workspace rather than a feature of one machin
 
 | Component | How |
 |---|---|
-| Postgres | native NixOS service, loopback only |
+| Postgres | native NixOS service, loopback only, password auth for the relay's role |
 | Redis | native NixOS service, loopback only |
 | SeaweedFS (S3) | systemd unit shipped by this flake, loopback only |
 | Buzz relay | upstream container image, host networking |
@@ -64,6 +64,7 @@ agent extra tools with `extraPackages`.
     enable = true;
     domain = "buzz.example.com";
     relay.environmentFile   = "/etc/buzz/relay.env";
+    database.passwordFile   = "/etc/buzz/postgres.pass";
     redis.passwordFile      = "/etc/buzz/redis.pass";
     seaweedfs.s3ConfigFile  = "/etc/buzz/seaweedfs-s3.json";
     agent.enable            = true;
@@ -91,7 +92,7 @@ Regression tests for failures this module has actually had, not smoke tests:
 | Test | Guards |
 |---|---|
 | `agent-only` | the agent runs with **no** relay/database/object store; `SHELL` is set and a shell plus the `buzz` CLI are on its PATH (without them it reacts, runs a full turn and posts nothing); the systemd sandbox is applied |
-| `workspace` | SeaweedFS binds S3/volume/filer/master and **not** 8080 (which the relay takes); nothing listens beyond loopback; Postgres accepts the owning role over TCP; Redis demands its password; **S3 enforces conditional writes** - a second `If-None-Match: *` gets 412 and the first writer's bytes survive |
+| `workspace` | SeaweedFS binds S3/volume/filer/master and **not** 8080 (which the relay takes); nothing listens beyond loopback; the relay is told to bind loopback; Postgres refuses the owning role over TCP without its password and the composed `DATABASE_URL` authenticates; Redis demands its password; **S3 enforces conditional writes** - a second `If-None-Match: *` gets 412 and the first writer's bytes survive |
 
 The conditional-write case is the one that matters most: it is the property Buzz's git object
 store depends on, the reason Garage was unusable, and it fails silently at the storage layer
@@ -104,8 +105,9 @@ before the first switch.
 
 | File | Contents |
 |---|---|
-| `relay.env` | `DATABASE_URL`, `REDIS_URL`, `BUZZ_S3_*`, `BUZZ_RELAY_PRIVATE_KEY`, `RELAY_OWNER_PUBKEY`, `BUZZ_DOMAIN`, `BUZZ_CORS_ORIGINS`, `BUZZ_MEDIA_*` |
+| `relay.env` | `REDIS_URL`, `BUZZ_S3_*`, `BUZZ_RELAY_PRIVATE_KEY`, `RELAY_OWNER_PUBKEY`, `BUZZ_DOMAIN`, `BUZZ_CORS_ORIGINS`, `BUZZ_MEDIA_*`. Not `DATABASE_URL`: the module composes it from `postgres.pass` |
 | `agent.env` | `BUZZ_PRIVATE_KEY`, `BUZZ_RELAY_URL`, `BUZZ_ACP_AGENT_OWNER`, `BUZZ_ACP_AGENT_COMMAND`, plus the agent backend's own credential |
+| `postgres.pass` | Password of the owning Postgres role, one line. Set on the role at every Postgres start; the relay authenticates with it over loopback (`scram-sha-256`, no `trust` rule) |
 | `redis.pass`, `seaweedfs-s3.json` | Redis password; SeaweedFS S3 identities (access key + secret) |
 | `credentials.json` | Cloudflare tunnel credentials |
 

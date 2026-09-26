@@ -16,6 +16,7 @@
     relay.image = "ghcr.io/block/buzz:main";
     relay.environmentFile = "/etc/buzz/relay.env";
 
+    database.passwordFile = "/etc/buzz/postgres.pass";
     redis.passwordFile  = "/etc/buzz/redis.pass";
     seaweedfs.s3ConfigFile = "/etc/buzz/seaweedfs-s3.json";
 
