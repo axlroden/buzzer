@@ -63,7 +63,7 @@ any bump that has been waiting.
 |---|---|---|---|
 | W1 | Agent publishes `kind:0` only, so it is mentionable but unbadged | [#2987](https://github.com/block/buzz/issues/2987), [#3277](https://github.com/block/buzz/issues/3277), [#4223](https://github.com/block/buzz/issues/4223), [#5581](https://github.com/block/buzz/pull/5581) | For our `owner-only` config specifically: the client-side owner comparison already landed (verified on `main`), so only #5581 (or an equivalent fix for #4223) merging - so a direct member's NIP-OA owner attestation actually resolves on our closed relay - is left |
 | W5 | Relay runs from the upstream container image, not built from source | not filed | Upstream publishes the frontend assets, or a source build produces the web surface |
-| W6 | Postgres needs `enableTCPIP` + a loopback `trust` rule | gated on W5 | The relay no longer runs in a container |
+| W6 | Postgres needs `enableTCPIP` + a loopback `scram-sha-256` rule and a password the module manages | gated on W5 | The relay no longer runs in a container |
 | W8 | Since desktop v0.5.12, the agent lost @-mentionability: the send-boundary gate requires `kind:10100` `channel_ids`/`respond_to` fields that nothing in this stack publishes | [#5681](https://github.com/block/buzz/pull/5681) (merged, the regression), [#5869](https://github.com/block/buzz/issues/5869), [#5878](https://github.com/block/buzz/pull/5878), [#5928](https://github.com/block/buzz/issues/5928) | #5878 or #5928 merges (either publishes our agent's `kind:10100` directory record) and we adopt it, or the gate ships a membership-based fallback |
 | W9 | `buzz-acp`'s MCP shell config puts `BUZZ_PRIVATE_KEY`/`BUZZ_AUTH_TAG` in reach of model-controlled shell commands - this deployment gives the agent unit a shell (see README, "The agent replies by shelling out") | [#2883](https://github.com/block/buzz/issues/2883) (closed 2026-08-22, no fix merged - see below), [#5288](https://github.com/block/buzz/pull/5288) | #5288 (or an equivalent fix) merges - would also let us drop the shell workaround entirely |
 
@@ -302,9 +302,10 @@ it without a web surface. The agent-side crates (`buzz-acp`, `buzz-cli`) have no
 artifacts at all, so this flake builds them from a pinned revision with a vendored
 `Cargo.lock`.
 
-The container is also why Postgres needs `enableTCPIP` and a loopback `trust` rule (W6): it
+The container is also why Postgres needs `enableTCPIP` and a loopback password rule (W6): it
 shares the host's network namespace but **not** its mounts, so it cannot reach the unix
-socket.
+socket. It was a `trust` rule until 2026-09-27; TCP trust checks nothing about the caller,
+so the co-hosted agent could have connected as the owning role.
 
 **Clear when** a source build can produce the full web surface - that removes Docker from
 the dependency set, and W6 with it.
