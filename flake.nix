@@ -5,9 +5,14 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     disko.url = "github:nix-community/disko";
     disko.inputs.nixpkgs.follows = "nixpkgs";
+    # RustSec advisory database for checks.cargo-audit. Locked like any input, so
+    # `nix flake update advisory-db` is how the audit learns about new advisories; CI
+    # does that on every run without committing it.
+    advisory-db.url = "github:rustsec/advisory-db";
+    advisory-db.flake = false;
   };
 
-  outputs = { self, nixpkgs, disko }:
+  outputs = { self, nixpkgs, disko, advisory-db }:
   let
     systems = [ "x86_64-linux" "aarch64-linux" ];
     forAll = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
@@ -48,6 +53,17 @@
     checks = forAll (pkgs: {
       workspace = import ./tests/workspace.nix { inherit pkgs self; };
       agent-only = import ./tests/agent-only.nix { inherit pkgs self; };
+      # The vendored lock against the RustSec DB. Fails on any vulnerability that is
+      # not explicitly ignored below; unmaintained/unsound notices stay warnings.
+      # Ignore only what the three crates this flake builds cannot reach (verified with
+      # `cargo tree --locked -p buzz-acp -p buzz-cli -p git-credential-nostr -i <crate>`)
+      # and upstream has to fix; docs/upstream-watch.md has the table.
+      cargo-audit = pkgs.runCommand "buzz-agent-tools-cargo-audit"
+        { nativeBuildInputs = [ pkgs.cargo-audit ]; } ''
+          cargo-audit audit --no-fetch --db ${advisory-db} --file ${./pkgs/Cargo.lock} \
+            --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195 \
+            | tee $out
+        '';
     });
   };
 }
