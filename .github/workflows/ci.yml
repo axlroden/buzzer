@@ -1,0 +1,35 @@
+# Evaluation, lint and the dependency audit on every push and PR.
+#
+# The VM tests (checks.workspace, checks.agent-only) need the Rust build of the agent
+# crates - tens of minutes with no binary cache - and KVM, so they stay a local gate:
+# `nix flake check` before merging a module change (README, "Tests"). This workflow
+# proves everything evaluates on both systems, the lint is clean, and the vendored lock
+# carries no known vulnerability that the built crates can reach.
+name: ci
+on:
+  push:
+    branches: [master]
+  pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      - name: Evaluate every output on every system
+        run: nix flake check --no-build --all-systems
+      - name: deadnix
+        run: nix run nixpkgs#deadnix -- --fail .
+      - name: statix
+        run: nix run nixpkgs#statix -- check .
+      - name: cargo audit against today's RustSec DB
+        # The locked advisory-db is whatever it was at the last `nix flake update`; move
+        # it to head for this run only, so a new advisory fails CI the day it is published.
+        run: |
+          nix flake update advisory-db
+          nix build --print-build-logs .#checks.x86_64-linux.cargo-audit
