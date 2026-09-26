@@ -345,9 +345,15 @@ The relay runs from the upstream image while the agent-side crates are built fro
 [docs/upstream-watch.md](docs/upstream-watch.md) explains why, and what would let both be
 built the same way.
 
-Bump `rev`/`hash` in `pkgs/buzz-agent-tools.nix`
-(`nix flake prefetch --json github:block/buzz/<rev> | jq -r .hash`), copy that revision's
-`Cargo.lock` into `pkgs/`, and re-pin `relay.image` to the matching digest.
+1. Bump `rev`/`hash` in `pkgs/buzz-agent-tools.nix`
+   (`nix flake prefetch --json github:block/buzz/<rev> | jq -r .hash`).
+2. Copy that revision's `Cargo.lock` into `pkgs/`, **then re-apply the security bumps our
+   lock carries** - they are listed under *Dependency pins and advisories* in
+   [docs/upstream-watch.md](docs/upstream-watch.md). A plain copy of upstream's lock
+   silently reverts them; `nix flake check` catches a regression through
+   `checks.cargo-audit`, but only for advisories the audit DB already knows.
+3. Re-pin `relay.image` to the matching digest
+   (`docker buildx imagetools inspect ghcr.io/block/buzz:main` prints it without a pull).
 
 ## Security notes
 

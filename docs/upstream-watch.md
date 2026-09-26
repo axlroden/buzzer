@@ -3,13 +3,10 @@
 Every workaround this module carries, why it exists, and **what has to happen upstream
 before it can be deleted**.
 
-Two audiences:
-
-- **Humans**, when something behaves oddly and you want to know whether it is a bug, a
-  deliberate choice, or something we are waiting on.
-- **The daily tracker**, which re-checks each *Watch* reference below against
-  [`block/buzz`](https://github.com/block/buzz) and opens a PR when a *Clear when* condition
-  is met.
+For humans, when something behaves oddly and you want to know whether it is a bug, a
+deliberate choice, or something we are waiting on. Nothing re-checks the *Watch*
+references automatically: re-read them before bumping the pin, and when a *Clear when*
+condition is met, drop the workaround in the same change that adopts the fix.
 
 Buzz moves fast. An entry going stale is the expected outcome, not a surprise - the point of
 this file is that nobody has to rediscover *why* a line of config is there.
@@ -36,24 +33,18 @@ descendant of the commit that fixed them. Nothing recorded that at the time, so 
 backlog read nine deep when it was one. **If you are counting open advisories, read the
 vendored lock, not the branch names.**
 
-### Do NOT merge `fix/buzz-agent-tools-rustsec-nostr-bump` - superseded 2026-08-20
+### A stale pin branch is a revert wearing a fix's name
 
-That branch pins `318fbf8` and its commit message says it clears
-RUSTSEC-2026-0225..0232, so it reads like eight outstanding fixes. It is a **revert**.
-
-`318fbf8` is an *ancestor* of the pin master already carries: the upstream history is
-`318fbf8` -> 29 commits -> `631b05c` (master) -> 253 commits -> `cc8a8b0d`. Its crate
-versions are identical to master's, so it fixes nothing that is not already fixed, and
-merging it would move the pin backwards 29 commits and undo the acp system-prompt fix
-that is currently live.
+Learned 2026-08-20 from a branch (since deleted) that pinned `318fbf8` and said it cleared
+RUSTSEC-2026-0225..0232. `318fbf8` was an *ancestor* of the pin master already carried,
+with identical crate versions, so merging it would have moved the pin back 29 commits and
+undone a live fix while reading like eight security fixes.
 
 The general trap, because it will recur with any pin branch: **a stale branch is not
 automatically behind on its purpose, but it is always behind on its base - and for a
 branch whose entire content is a pin, being behind on the base makes it a revert wearing
 a fix's name.** Check ancestry (`gh api repos/block/buzz/compare/A...B`) before merging
 any bump that has been waiting.
-
-The branch is kept, not deleted, so this reasoning stays attached to something.
 
 ## Waiting on upstream
 
