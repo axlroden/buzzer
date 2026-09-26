@@ -7,7 +7,6 @@
 
 let
   cfg = config.services.buzzer;
-  buzz-agent-tools = pkgs.callPackage ../pkgs/buzz-agent-tools.nix { };
 in
 {
   # The agent is a separate module so it can be deployed on its own, against a relay this
@@ -380,7 +379,9 @@ in
       };
     };
 
-    environment.systemPackages = [ buzz-agent-tools pkgs.seaweedfs pkgs.postgresql_17 ];
+    # The same build the agent unit runs, so `buzz` on the operator's PATH is never a
+    # second instantiation that can drift from it.
+    environment.systemPackages = [ config.services.buzz-agent.package pkgs.seaweedfs pkgs.postgresql_17 ];
 
   };
 }
